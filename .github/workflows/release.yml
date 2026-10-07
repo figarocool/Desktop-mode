@@ -28,11 +28,16 @@ jobs:
                 -DDM_RELEASE_VERSION="$GITHUB_REF_NAME"
               cmake --build native/build --target desktop-mode.vpk-vpk --parallel 2
               cp native/build/desktop-mode.vpk.out native/build/desktop-mode.vpk
-              python3 scripts/package-release.py
-              python3 scripts/create-release-manifest.py "$GITHUB_REF_NAME"
-              cd native/build
-              sha256sum desktop-mode.vpk desktop-mode-apps.zip desktop-mode-sdk.zip desktop-mode-source.zip desktop-pdf-library.zip desktop-mode-update.json notepad.dmapp counter.dmapp browser.dmapp calculator.dmapp taskmanager.dmapp paint.dmapp images.dmapp console.dmapp pdf.dmapp network.dmapp solitaire.dmapp minesweeper.dmapp media.dmapp > SHA256SUMS
+              scripts/build-pdf-library.sh vita
             '
+
+      - name: Build host PDF library and package release assets
+        run: |
+          scripts/build-pdf-library.sh linux
+          python3 scripts/package-release.py
+          python3 scripts/create-release-manifest.py "$GITHUB_REF_NAME"
+          cd native/build
+          sha256sum desktop-mode.vpk desktop-mode-apps.zip desktop-mode-sdk.zip desktop-mode-source.zip desktop-pdf-library.zip desktop-mode-update.json notepad.dmapp counter.dmapp browser.dmapp calculator.dmapp taskmanager.dmapp paint.dmapp images.dmapp console.dmapp pdf.dmapp network.dmapp solitaire.dmapp minesweeper.dmapp media.dmapp > SHA256SUMS
 
       - name: Publish GitHub release
         env:
