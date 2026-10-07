@@ -33,6 +33,7 @@ jobs:
 
       - name: Build host PDF library and package release assets
         run: |
+          sudo chown -R "$USER":"$USER" native/build
           sudo apt-get update
           sudo apt-get install -y libfreetype-dev
           scripts/build-pdf-library.sh linux
