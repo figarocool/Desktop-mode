@@ -53,6 +53,11 @@ static CURL *new_request(const char *url) {
     CURL *curl=curl_easy_init();
     if(!curl)return NULL;
     curl_easy_setopt(curl,CURLOPT_URL,url);
+    /* Vita can expose stale system proxy settings to libcurl. GitHub is
+       reachable directly on the console; bypass environment proxies and
+       keep the updater on the well-tested HTTP/1.1 path. */
+    curl_easy_setopt(curl,CURLOPT_PROXY,"");
+    curl_easy_setopt(curl,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION,1L);
     curl_easy_setopt(curl,CURLOPT_MAXREDIRS,5L);
     curl_easy_setopt(curl,CURLOPT_PROTOCOLS_STR,"https");
