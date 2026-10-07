@@ -35,7 +35,7 @@ jobs:
         run: |
           sudo chown -R "$USER":"$USER" native/build
           sudo apt-get update
-          sudo apt-get install -y libfreetype-dev
+          sudo apt-get install -y libfreetype-dev libjpeg-dev zlib1g-dev
           scripts/build-pdf-library.sh linux
           python3 scripts/package-release.py
           python3 scripts/create-release-manifest.py "$GITHUB_REF_NAME"
