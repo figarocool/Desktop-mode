@@ -1,4 +1,5 @@
 #include "desktop_ui.h"
+#include "system_properties.h"
 #include "file_jobs.h"
 #include "app_manager.h"
 #include "rename.h"
@@ -109,7 +110,7 @@ static struct {
 }
 prompt;
 enum {
-    ACT_OPEN,ACT_COPY,ACT_PASTE,ACT_SHORTCUT,ACT_TEXT,ACT_FOLDER,ACT_REFRESH,ACT_COMPUTER,ACT_PERSONALIZE,ACT_NOTEPAD,ACT_TEXTCOPY,ACT_TEXTPASTE,ACT_SAVE,ACT_DELETE,ACT_EMPTY,ACT_RESTORE,ACT_TEXTCUT,ACT_SELECTALL,ACT_RENAME
+    ACT_OPEN,ACT_COPY,ACT_PASTE,ACT_SHORTCUT,ACT_TEXT,ACT_FOLDER,ACT_REFRESH,ACT_COMPUTER,ACT_PERSONALIZE,ACT_NOTEPAD,ACT_TEXTCOPY,ACT_TEXTPASTE,ACT_SAVE,ACT_DELETE,ACT_EMPTY,ACT_RESTORE,ACT_TEXTCUT,ACT_SELECTALL,ACT_RENAME,ACT_PROPERTIES
 };
 static struct {
     const char*label;
@@ -1318,6 +1319,7 @@ static void run_action(int act) {
         refresh_all();
     }
     if(act==ACT_COMPUTER)dm_launch("explorer","");
+    if(act==ACT_PROPERTIES)dm_launch("properties",NULL);
     if(act==ACT_PERSONALIZE)dm_launch("personalize",NULL);
     if(act==ACT_NOTEPAD)dm_launch("notepad",NULL);
     if(act==ACT_TEXTCOPY||act==ACT_TEXTPASTE||act==ACT_SAVE||act==ACT_TEXTCUT||act==ACT_SELECTALL) {
@@ -1365,6 +1367,7 @@ static void show_context(void) {
         }
         add_menu("Seleziona tutto",ACT_SELECTALL);
         add_menu("Aggiorna / cerca app",ACT_REFRESH);
+        if(!e->path[0])add_menu("Proprietà",ACT_PROPERTIES);
     }      else if(context_window&&!strcmp(context_window->app->id,"notepad")) {
         add_menu("Seleziona tutto",ACT_SELECTALL);
         add_menu("Taglia",ACT_TEXTCUT);
@@ -1394,6 +1397,7 @@ static void show_context(void) {
                     add_menu("Svuota Cestino",ACT_EMPTY);
                 }
                 snprintf(context_target,sizeof(context_target),"%s",i==1?"app:explorer":i==2?"app:control":i==4?"trash:":i==3?"ux0:/data/":i==5?"ux0:/app/":"app:about");
+                if(i==1)add_menu("Proprietà",ACT_PROPERTIES);
                 add_menu("Crea collegamento sul desktop",ACT_SHORTCUT);
                 break;
             }
@@ -1887,6 +1891,7 @@ int main(void) {
     dm_preferences_init();dm_register_app(&dm_settings_app);
     sceIoMkdir(STORE "screensavers/",0777);dm_scan_savers();
     dm_register_app(&explorer_app);
+    dm_register_app(&dm_system_properties_app);
     dm_register_app(&personalize_app);
     dm_register_app(&about_app);
     dm_register_app(&dm_wasm_sandbox_app);
@@ -1901,10 +1906,14 @@ int main(void) {
     sceIoMkdir(STORE "apps/",0777);
     DmUpdateResult update_result;
     dm_updates_check(&update_result);
+    if(update_result.core_must_exit){
+        /* Exit after promotion so the next launch maps the updated executable. */
+        sceKernelExitProcess(0);
+    }
     dm_scan_plugins();
-    if(update_result.apps_updated&&update_result.core_ready){char message[160];snprintf(message,sizeof(message),"%d app aggiornate. Core %s scaricato: installa il VPK e riavvia.",update_result.apps_updated,update_result.tag);dm_status(message);}
+    if(update_result.apps_updated&&update_result.core_ready){char message[160];snprintf(message,sizeof(message),"%d app aggiornate. Core %s scaricato ma installazione non riuscita (0x%08X).",update_result.apps_updated,update_result.tag,(unsigned)update_result.core_install_error);dm_status(message);}
     else if(update_result.apps_updated){char message[128];snprintf(message,sizeof(message),"%d app aggiornate da GitHub (%s).",update_result.apps_updated,update_result.tag);dm_status(message);}
-    else if(update_result.core_ready){char message[144];snprintf(message,sizeof(message),"Core %s scaricato in ux0:/data/desktop-mode/updates/desktop-mode.vpk; installalo e riavvia.",update_result.tag);dm_status(message);}
+    else if(update_result.core_ready){char message[160];snprintf(message,sizeof(message),"Core %s scaricato ma installazione non riuscita (0x%08X); VPK conservata in updates.",update_result.tag,(unsigned)update_result.core_install_error);dm_status(message);}
     dm_associations_load();
     dm_clock_initialize();
     trash_has_items=dm_trash_has_items(NULL);

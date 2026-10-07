@@ -3,6 +3,7 @@
 Desktop PS Vita scritto in C, ispirato a Vista / Play OS: icone trasparenti e spostabili, menu Start e menu contestuali, file manager, finestre con taskbar e pannello di controllo. Interfaccia nativa, senza JavaScript o PocketJS.
 
 - VPK: `native/build/desktop-mode.vpk`.
+- [Scarica la build di prova Vita v1.0.1-local](downloads/desktop-mode-v1.0.1-local.vpk).
 - Anteprima Linux: `./scripts/desktop-preview.sh`.
 - [Funzioni, controlli e limiti](native/README.md).
 - [API e SDK per app esterne (italiano)](docs/desktop-api.md) · [API and SDK (English)](docs/desktop-api-en.md).
@@ -25,4 +26,4 @@ La finestra Rete cerca dispositivi IPv4 e gestisce condivisioni SMB: navigazione
 
 La lingua IT/EN/ES si applica all’interfaccia integrata e ai moduli inclusi. Le app create con Desktop API possono usare `dm_localize(it, en, es)` per le proprie traduzioni; `dm_text_raw` conserva testo, nomi e percorsi digitati senza tradurli.
 
-All'avvio, il sistema controlla le release GitHub e aggiorna i moduli `.dmapp` verificati; un nuovo VPK del core viene scaricato e messo in staging per l'installazione tramite Vita. Vedi [documentazione aggiornamenti](docs/aggiornamenti-release.md).
+All'avvio, il sistema controlla le release GitHub e installa i moduli `.dmapp` verificati. Se trova un core nuovo, verifica ed estrae la VPK e tenta l'installazione tramite il package promoter nativo della Vita; dopo il successo esce, così il successivo avvio carica il core aggiornato. Se la console rifiuta l'installazione, conserva la VPK verificata in `ux0:/data/desktop-mode/updates/desktop-mode.vpk` per l'installazione manuale. Vedi [documentazione aggiornamenti](docs/aggiornamenti-release.md).

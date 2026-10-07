@@ -1,0 +1,4 @@
+Windows 98-style device icons were obtained from ryokun6/ryos, public/resources/windows-icon-catalogs/win98. Source repository: https://github.com/ryokun6/ryos (AGPL-3.0 repository license).
+The Bluetooth symbol was obtained from infofintech/memphis: https://github.com/infofintech/memphis (MIT).
+
+The PNG files in this project are 16x16 nearest-neighbor reductions of those source icons.

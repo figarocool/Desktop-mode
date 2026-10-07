@@ -10,11 +10,11 @@ set(ENABLE_LIBDCERPC OFF CACHE BOOL "" FORCE)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 add_subdirectory(vendor/libsmb2)
 add_subdirectory(vendor/wasm3)
-add_executable(desktop_mode main.c filesystem.c plugins.c system.c control_panel.c file_dialog.c clock_ui.c confirm_ui.c file_jobs.c app_manager.c network.c network_settings.c netctl_private.S rename.c media.c media_player.c file_icons.c file_types.c device_ui.c bluetooth_native.c preferences.c i18n.c app_runtime.c screensaver.c drop_transfer.c rdp_server.c remote_panel.c input_devices.c multi_file.c wasm_sandbox.c wasm_app_runtime.c openssl_compat.c vendor/browser-engine/duktape/src/duktape.c)
-target_sources(desktop_mode PRIVATE updater.c)
+add_executable(desktop_mode main.c filesystem.c plugins.c system.c system_properties.c control_panel.c file_dialog.c clock_ui.c confirm_ui.c file_jobs.c app_manager.c network.c network_settings.c netctl_private.S rename.c media.c media_player.c file_icons.c file_types.c device_ui.c bluetooth_native.c preferences.c i18n.c app_runtime.c screensaver.c drop_transfer.c rdp_server.c remote_panel.c input_devices.c multi_file.c wasm_sandbox.c wasm_app_runtime.c openssl_compat.c vendor/browser-engine/duktape/src/duktape.c)
+target_sources(desktop_mode PRIVATE updater.c core_installer.c)
 target_include_directories(desktop_mode PRIVATE vendor/libsmb2/include)
 target_compile_options(desktop_mode PRIVATE -Wall -Wextra -O2)
-target_link_libraries(desktop_mode smb2 m3 -Wl,--start-group curl ssl crypto -Wl,--end-group zstd vita2d png jpeg webp sharpyuv pthread z m SceDisplay_stub SceGxm_stub SceSysmodule_stub SceAvPlayer_stub SceAudio_stub SceCtrl_stub SceTouch_stub ScePgf_stub ScePvf_stub SceCommonDialog_stub SceAppMgr_stub SceLibKernel_stub SceIofilemgr_stub SceSysmem_stub SceProcessmgr_stub SceKernelModulemgr_stub ScePower_stub SceNetCtl_stub SceNet_stub SceRtc_stub SceAVConfig_stub SceHid_stub SceBt_stub SceWlanBt_stub SceKernelThreadMgr_stub SceAppUtil_stub)
+target_link_libraries(desktop_mode smb2 m3 -Wl,--start-group curl ssl crypto minizip lzma ppmd z -Wl,--end-group zstd vita2d png jpeg webp sharpyuv pthread z m SceDisplay_stub SceGxm_stub SceSysmodule_stub ScePromoterUtil_stub ScePaf_stub SceAvPlayer_stub SceAudio_stub SceCtrl_stub SceTouch_stub ScePgf_stub ScePvf_stub SceCommonDialog_stub SceAppMgr_stub SceLibKernel_stub SceIofilemgr_stub SceSysmem_stub SceProcessmgr_stub SceKernelModulemgr_stub ScePower_stub SceNetCtl_stub SceNet_stub SceRtc_stub SceAVConfig_stub SceHid_stub SceBt_stub SceWlanBt_stub SceKernelThreadMgr_stub SceAppUtil_stub)
 
 # Optional VitaSDK codecs are linked statically into eboot.bin and therefore
 # travel inside the VPK. They are optional so older VitaSDK installations can

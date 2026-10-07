@@ -28,7 +28,7 @@ Il server Desktop remoto condivide la schermata della shell con mouse e tastiera
 
 ## Aggiornamenti
 
-All'avvio la Vita controlla l'ultima release GitHub. Scarica le `.dmapp` modificate, verifica checksum e formato, poi le carica da `ux0:/data/desktop-mode/apps/` dando loro precedenza sulle copie nel VPK. Il core VPK viene scaricato e verificato in `ux0:/data/desktop-mode/updates/desktop-mode.vpk`; l'installazione del VPK richiede l'installatore homebrew della console e un riavvio. Il manifest e il flusso di release sono descritti in [Aggiornamenti](aggiornamenti-release.md).
+All'avvio la Vita controlla l'ultima release GitHub. Scarica e verifica le `.dmapp` modificate, poi le carica da `ux0:/data/desktop-mode/apps/` dando loro precedenza sulle copie nel VPK. Se trova un core semanticamente più nuovo, verifica ed estrae la VPK e tenta l'installazione con il package promoter nativo; se riesce, chiude l'app affinché il lancio successivo usi il core aggiornato. Se la console rifiuta l'installazione, conserva la VPK verificata in `ux0:/data/desktop-mode/updates/desktop-mode.vpk`. Il manifest e il flusso di release sono descritti in [Aggiornamenti](aggiornamenti-release.md).
 
 ## Compilazione e test
 

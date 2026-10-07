@@ -28,7 +28,7 @@ The Remote Desktop server shares the shell display with remote mouse and keyboar
 
 ## Updates
 
-At Vita startup, the updater checks the latest GitHub release. It downloads changed `.dmapp` packages, verifies their checksums and format, then loads them from `ux0:/data/desktop-mode/apps/` ahead of the copies embedded in the VPK. A new core VPK is downloaded and verified at `ux0:/data/desktop-mode/updates/desktop-mode.vpk`; installing it requires the console's homebrew installer and a restart. See [release updates](aggiornamenti-release.md).
+At Vita startup, the updater checks the latest GitHub release. It downloads and verifies changed `.dmapp` packages, then loads them from `ux0:/data/desktop-mode/apps/` ahead of the copies embedded in the VPK. For a semantically newer core, it verifies and extracts the VPK and attempts installation through the Vita's native package promoter. On success, the app exits so the next launch uses the updated core. If Vita rejects installation, the verified VPK remains at `ux0:/data/desktop-mode/updates/desktop-mode.vpk`. See [release updates](aggiornamenti-release.md).
 
 ## Build and tests
 

@@ -1,4 +1,5 @@
 #include "updater.h"
+#include "core_installer.h"
 #include "app_manager.h"
 #include "desktop_api.h"
 #include <curl/curl.h>
@@ -123,6 +124,35 @@ static int valid_digest(const char *s) {
     return 1;
 }
 
+typedef struct { unsigned part[3]; const char *suffix; } ReleaseVersion;
+
+static int parse_release_version(const char *s,ReleaseVersion *v) {
+    if(!s||!v)return 0;
+    if(*s=='v'||*s=='V')s++;
+    for(int i=0;i<3;i++){
+        if(*s<'0'||*s>'9')return 0;
+        unsigned value=0;
+        do{unsigned digit=(unsigned)(*s-'0');if(value>(999999u-digit)/10u)return 0;value=value*10u+digit;s++;}while(*s>='0'&&*s<='9');
+        v->part[i]=value;
+        if(i<2){if(*s!='.')return 0;s++;}
+    }
+    if(*s&&*s!='-'&&*s!='+')return 0;
+    v->suffix=s;
+    return 1;
+}
+
+static int release_is_newer(const char *candidate,const char *installed) {
+    ReleaseVersion a,b;
+    /* Local development builds have no release ordering; never replace one
+       with an older GitHub release just because its string differs. */
+    if(!parse_release_version(candidate,&a)||!parse_release_version(installed,&b))return 0;
+    for(int i=0;i<3;i++)if(a.part[i]!=b.part[i])return a.part[i]>b.part[i];
+    int a_pre=*a.suffix=='-',b_pre=*b.suffix=='-';
+    if(a_pre!=b_pre)return !a_pre;
+    if(!a_pre)return 0;
+    return strcmp(a.suffix,b.suffix)>0;
+}
+
 static const char *object_for(const char *json,const char *key) {
     char needle[80];int n=snprintf(needle,sizeof(needle),"\"%s\"",key);
     if(n<0||(size_t)n>=sizeof(needle))return NULL;
@@ -213,6 +243,27 @@ static int ensure_directories(void) {
     return 0;
 }
 
+static int core_failure_for_tag(const char *tag,int *error) {
+    char data[96]={0};
+    int fd=sceIoOpen(UPDATE_DIR ".core-install-failed",SCE_O_RDONLY,0);
+    if(fd<0)return 0;
+    int n=sceIoRead(fd,data,sizeof(data)-1);sceIoClose(fd);
+    if(n<=0)return 0;
+    data[n]=0;
+    char saved[48]={0};unsigned code=0;
+    if(sscanf(data,"%47s %x",saved,&code)!=2||strcmp(saved,tag))return 0;
+    if(error)*error=(int)code;
+    return 1;
+}
+
+static void remember_core_failure(const char *tag,int error) {
+    int fd=sceIoOpen(UPDATE_DIR ".core-install-failed",SCE_O_WRONLY|SCE_O_CREAT|SCE_O_TRUNC,0666);
+    if(fd<0)return;
+    char data[96];int n=snprintf(data,sizeof(data),"%s %08X\n",tag,(unsigned)error);
+    if(n>0&&(size_t)n<sizeof(data))sceIoWrite(fd,data,(size_t)n);
+    sceIoClose(fd);
+}
+
 static int update_app(const char *id,const char *digest) {
     char user[DM_PATH_MAX],bundle[DM_PATH_MAX],temp[DM_PATH_MAX],backup[DM_PATH_MAX],asset[96];
     snprintf(user,sizeof(user),APP_DIR "%s.dmapp",id);
@@ -258,7 +309,7 @@ void dm_updates_check(DmUpdateResult *result) {
     if(field_from_object(core,"asset",core_asset,sizeof(core_asset))<0||strcmp(core_asset,"desktop-mode.vpk")||field_from_object(core,"sha256",core_digest,sizeof(core_digest))<0||!valid_digest(core_digest)){result->failed++;return;}
     dm_fs_read("app0:/assets/version.txt",current_version,sizeof(current_version));
     current_version[strcspn(current_version,"\r\n")]=0;
-    if(strcmp(current_version,tag)){
+    if(release_is_newer(tag,current_version)){
         char temp[DM_PATH_MAX],final[DM_PATH_MAX];
         snprintf(temp,sizeof(temp),UPDATE_DIR ".desktop-mode.vpk.part");
         snprintf(final,sizeof(final),UPDATE_DIR "desktop-mode.vpk");
@@ -267,6 +318,10 @@ void dm_updates_check(DmUpdateResult *result) {
             if(replace_file(temp,final,UPDATE_DIR ".desktop-mode.vpk.old")<0){sceIoRemove(temp);result->failed++;return;}
         }
         result->core_ready=1;
+        if(core_failure_for_tag(tag,&result->core_install_error))return;
+        result->core_install_error=dm_core_install_vpk(final,tag,&result->core_must_exit);
+        if(result->core_install_error==0){result->core_installed=1;sceIoRemove(UPDATE_DIR ".core-install-failed");}
+        else remember_core_failure(tag,result->core_install_error);
     }
 #endif
 }
