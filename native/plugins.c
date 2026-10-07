@@ -54,6 +54,7 @@ static int loaded_count;
 static unsigned extraction_sequence;
 static char plugin_diagnostic[192];
 const char *dm_plugin_diagnostic(void){return plugin_diagnostic;}
+int dm_plugin_bundle_removed(const char*id){char path[DM_PATH_MAX];if(!id||!id[0])return 0;int n=snprintf(path,sizeof(path),"app0:/apps/%s.dmapp",id);return n>0&&(size_t)n<sizeof(path)?is_removed(path):0;}
 static const char*plugin_log_path="ux0:/data/desktop-mode/app-loader.log";
 static void plugin_log_reset(void){
     sceIoMkdir("ux0:/data/desktop-mode",0777);
@@ -154,6 +155,7 @@ static int extract(const char*path,char*cache) {
     if(result)sceIoRemove(cache);
     return result;
 }
+static int app_id_registered(const char*id){for(int i=0;i<dm_registered_count();i++){const DmApp*a=dm_registered_app(i);if(a&&a->id&&!strcmp(a->id,id))return 1;}return 0;}
 int dm_load_plugin(const char*path) {
     const char*extension=strrchr(path,'.');
     if(!extension||strcasecmp(extension,".dmapp")) {
@@ -170,6 +172,10 @@ int dm_load_plugin(const char*path) {
         if(loaded[i].installed)return 0;
         if(loaded[i].app&&dm_register_app(loaded[i].app)==0){loaded[i].installed=1;return 0;}
         return -1;
+    }
+    if(!strncmp(path,"app0:/",6)){
+        const char*base=strrchr(path,'/');base=base?base+1:path;char id[64];size_t n=strlen(base);const char*dot=strrchr(base,'.');if(dot)n=(size_t)(dot-base);
+        if(n&&n<sizeof(id)){memcpy(id,base,n);id[n]=0;if(app_id_registered(id)){plugin_log("SKIP",path,"sostituita da un pacchetto ux0:/data/desktop-mode/apps");return 0;}}
     }
     unsigned char package_header[32];
     int package_fd=sceIoOpen(path,SCE_O_RDONLY,0);
@@ -266,12 +272,11 @@ void dm_scan_plugins(void) {
     snprintf(net_detail,sizeof(net_detail),"SCE_SYSMODULE_NET load=%08X",(unsigned)net_result);
     plugin_log("INFO",NULL,net_detail);
 #endif
-    const char*directories[]= {
-        "app0:/apps/","ux0:/data/desktop-mode/apps/"
-    };
 #ifdef DESKTOP_PREVIEW
+    const char*directories[]={"app0:/build/apps/","ux0:/data/desktop-mode/apps/"};
     const char*scan0="app0:/build/apps/";
 #else
+    const char*directories[]={"ux0:/data/desktop-mode/apps/","app0:/apps/"};
     const char*scan0=directories[0];
 #endif
     for(int i=0;i<2;i++) {

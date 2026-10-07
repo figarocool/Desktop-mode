@@ -5,11 +5,13 @@ Desktop PS Vita scritto in C, ispirato a Vista / Play OS: icone trasparenti e sp
 - VPK: `native/build/desktop-mode.vpk`.
 - Anteprima Linux: `./scripts/desktop-preview.sh`.
 - [Funzioni, controlli e limiti](native/README.md).
-- [API e SDK per app esterne](docs/desktop-api.md).
+- [API e SDK per app esterne (italiano)](docs/desktop-api.md) · [API and SDK (English)](docs/desktop-api-en.md).
+- [Guida completa del sistema (italiano)](docs/guida-sistema-it.md) · [System guide (English)](docs/system-guide-en.md).
+- [Release e aggiornamenti automatici](docs/aggiornamenti-release.md).
 
 Le app si sviluppano e compilano separatamente: copiare i pacchetti `.dmapp` in `ux0:/data/desktop-mode/apps/` e selezionare Cerca nuove app. Notepad, Browser e Contatore sono già moduli esterni al desktop; l'SDK include Hello come esempio con associazione `.hello`. La shell non deve essere ricompilata per aggiungerli.
 
-Compilati desktop Linux, VPK Vita e pacchetti `.dmapp` Vita; test runtime eseguiti su Linux. Collaudo sulla console ancora necessario. RDP, musica e messaggistica restano sviluppi futuri. La restante documentazione storica in `docs/` descrive ricerche precedenti, non il runtime attuale.
+La guida del sistema è disponibile in [italiano](docs/guida-sistema-it.md) e [inglese](docs/system-guide-en.md). Il codice compila per Linux e Vita; alcune funzioni hardware e la rete reale richiedono comunque test sulla console.
 
 Notepad supporta selezione parziale e taglia/copia/incolla. Browser usa il renderer interno nella finestra del desktop: parser HTML5/CSS Lexbor, JavaScript Duktape isolato, immagini PNG/JPEG/WebP, moduli GET/POST, schede, link e preferiti. Il layout CSS resta parziale e non equivale a un browser desktop; dettagli e limiti sono in [documentazione del renderer](native/vendor/browser-engine/README.md). Rete cerca IP locali e apre condivisioni SMB2/3. Le app incluse sono disinstallabili dal pannello. File e cartelle possono essere trascinati sul Cestino con conferma.
 
@@ -22,3 +24,5 @@ Icone dei documenti, miniature PNG/JPG, programmi predefiniti configurabili e co
 La finestra Rete cerca dispositivi IPv4 e gestisce condivisioni SMB: navigazione, download e invio file, rinomina, nuove cartelle ed eliminazione con conferma. Il pannello console mostra i dettagli dell’adattatore, cerca access point e invia SSID/password alle API userland private ricostruite; scansione e connessione vanno collaudate su Vita, mentre DHCP/IP statico restano da implementare: [stato rete e limiti](docs/status-network-usb.md).
 
 La lingua IT/EN/ES si applica all’interfaccia integrata e ai moduli inclusi. Le app create con Desktop API possono usare `dm_localize(it, en, es)` per le proprie traduzioni; `dm_text_raw` conserva testo, nomi e percorsi digitati senza tradurli.
+
+All'avvio, il sistema controlla le release GitHub e aggiorna i moduli `.dmapp` verificati; un nuovo VPK del core viene scaricato e messo in staging per l'installazione tramite Vita. Vedi [documentazione aggiornamenti](docs/aggiornamenti-release.md).

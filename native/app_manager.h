@@ -9,6 +9,7 @@ int dm_plugin_list(DmInstalledApp*out,int capacity);
 int dm_plugin_uninstall(const char*id);
 int dm_plugin_reinstall(const char*id);
 int dm_plugin_install(const char*path);
+int dm_plugin_bundle_removed(const char*id);
 const char *dm_plugin_diagnostic(void);
 #ifdef DESKTOP_PREVIEW
 void dm_plugin_test_settings(const char*path);

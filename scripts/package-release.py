@@ -63,6 +63,7 @@ with zipfile.ZipFile(build / 'desktop-mode.vpk') as z:
     for app in apps:
         assert z.read(f'apps/{app}.dmapp') == (build / f'{app}.dmapp').read_bytes()
     assert z.read('assets/pdf-font.ttf') == (root / 'native/assets/pdf-font.ttf').read_bytes()
+    assert z.read('assets/version.txt').strip()
 for name in ['desktop-mode.vpk', 'desktop-mode-apps.zip', 'desktop-mode-sdk.zip', 'desktop-mode-source.zip', 'desktop-pdf-library.zip']:
     with zipfile.ZipFile(build / name) as z:
         assert z.testzip() is None

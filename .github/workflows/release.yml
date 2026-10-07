@@ -24,7 +24,8 @@ jobs:
             vitasdk/vitasdk:2026.08 \
             sh -ec '
               cmake -S native -B native/build \
-                -DCMAKE_TOOLCHAIN_FILE="$VITASDK/share/vita.toolchain.cmake"
+                -DCMAKE_TOOLCHAIN_FILE="$VITASDK/share/vita.toolchain.cmake" \
+                -DDM_RELEASE_VERSION="$GITHUB_REF_NAME"
               cmake --build native/build --target desktop-mode.vpk-vpk --parallel 2
               cp native/build/desktop-mode.vpk.out native/build/desktop-mode.vpk
               python3 scripts/package-release.py

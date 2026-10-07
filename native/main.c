@@ -13,6 +13,7 @@
 #include "network_settings.h"
 #include "file_icons.h"
 #include "wasm_sandbox.h"
+#include "updater.h"
 #include <vita2d.h>
 #include <psp2/ctrl.h>
 #include <psp2/touch.h>
@@ -1898,7 +1899,12 @@ int main(void) {
     dm_register_app(&dm_app_manager_app);
     dm_register_app(&dm_network_settings_app);
     sceIoMkdir(STORE "apps/",0777);
+    DmUpdateResult update_result;
+    dm_updates_check(&update_result);
     dm_scan_plugins();
+    if(update_result.apps_updated&&update_result.core_ready){char message[160];snprintf(message,sizeof(message),"%d app aggiornate. Core %s scaricato: installa il VPK e riavvia.",update_result.apps_updated,update_result.tag);dm_status(message);}
+    else if(update_result.apps_updated){char message[128];snprintf(message,sizeof(message),"%d app aggiornate da GitHub (%s).",update_result.apps_updated,update_result.tag);dm_status(message);}
+    else if(update_result.core_ready){char message[144];snprintf(message,sizeof(message),"Core %s scaricato in ux0:/data/desktop-mode/updates/desktop-mode.vpk; installalo e riavvia.",update_result.tag);dm_status(message);}
     dm_associations_load();
     dm_clock_initialize();
     trash_has_items=dm_trash_has_items(NULL);
