@@ -2,7 +2,6 @@
 #include "fpkg_head.h"
 
 #ifndef DESKTOP_PREVIEW
-#include <minizip/unzip.h>
 #include <psp2/appmgr.h>
 #include <psp2/io/dirent.h>
 #include <psp2/io/fcntl.h>
@@ -11,7 +10,9 @@
 #include <psp2/kernel/processmgr.h>
 #include <psp2/sysmodule.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
 
 #define INSTALL_ROOT "ux0:/data/desktop-mode/updates/core-install"
 #define HELPER_ROOT "ux0:/data/desktop-mode/updates/helper-install"
@@ -67,42 +68,72 @@ static int safe_zip_name(const char *name) {
     return 1;
 }
 
+static uint16_t zip_u16(const unsigned char*p){return (uint16_t)(p[0]|((uint16_t)p[1]<<8));}
+static uint32_t zip_u32(const unsigned char*p){return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);}
+static int zip_read_at(int fd,uint32_t offset,void*data,size_t size){
+    if(sceIoLseek(fd,(SceOff)offset,SCE_SEEK_SET)<0)return -1;
+    unsigned char*p=data;size_t done=0;
+    while(done<size){int n=sceIoRead(fd,p+done,size-done);if(n<=0)return -1;done+=(size_t)n;}
+    return 0;
+}
+static int zip_write_all(int fd,const unsigned char*data,size_t size){
+    size_t done=0;while(done<size){int n=sceIoWrite(fd,data+done,size-done);if(n<=0)return -1;done+=(size_t)n;}return 0;
+}
+static int extract_zip_entry(int source,int dest,uint32_t data_offset,uint32_t compressed,uint32_t expected_size,uint32_t expected_crc,uint16_t method){
+    unsigned char input[16384],output[16384];uint32_t remaining=compressed,written=0;uLong crc=crc32(0L,Z_NULL,0);
+    if(method==0){
+        while(remaining){size_t chunk=remaining<sizeof(input)?remaining:sizeof(input);if(zip_read_at(source,data_offset,input,chunk)<0||zip_write_all(dest,input,chunk)<0)return -1;crc=crc32(crc,input,(uInt)chunk);data_offset+=(uint32_t)chunk;remaining-=(uint32_t)chunk;written+=(uint32_t)chunk;}
+    }else if(method==8){
+        z_stream stream;memset(&stream,0,sizeof(stream));if(inflateInit2(&stream,-MAX_WBITS)!=Z_OK)return -1;int result=Z_OK;
+        while(result==Z_OK){
+            if(!stream.avail_in&&remaining){uInt chunk=remaining<sizeof(input)?remaining:(uInt)sizeof(input);if(zip_read_at(source,data_offset,input,chunk)<0){result=Z_DATA_ERROR;break;}data_offset+=chunk;remaining-=chunk;stream.next_in=input;stream.avail_in=chunk;}
+            stream.next_out=output;stream.avail_out=sizeof(output);result=inflate(&stream,Z_NO_FLUSH);size_t produced=sizeof(output)-stream.avail_out;
+            if(produced){if(written>expected_size||produced>expected_size-written||zip_write_all(dest,output,produced)<0){result=Z_DATA_ERROR;break;}crc=crc32(crc,output,(uInt)produced);written+=(uint32_t)produced;}
+            if(result==Z_BUF_ERROR&&!remaining&&!stream.avail_in)break;
+        }
+        inflateEnd(&stream);if(result!=Z_STREAM_END)return -1;
+    }else return -1;
+    return written==expected_size&&(uint32_t)crc==expected_crc?0:-1;
+}
+
+/* Parse ordinary ZIP/VPK central-directory records directly. This avoids the
+ * VitaSDK minizip archive's OpenSSL-1.0-only encryption symbols; VPKs here use
+ * ZIP Store/Deflate and are independently size/CRC checked before promotion. */
 static int extract_vpk(const char *vpk,const char *root) {
-    unzFile zip=unzOpen64(vpk);
-    if(!zip)return -1;
-    unz_global_info64 global;
-    if(unzGetGlobalInfo64(zip,&global)!=UNZ_OK||global.number_entry>ZIP_ENTRY_LIMIT||unzGoToFirstFile(zip)!=UNZ_OK){unzClose(zip);return -1;}
-    uint64_t total=0;
-    int ok=1;
-    char name[512],path[1024],buffer[16384];
-    for(uint64_t i=0;i<global.number_entry&&ok;i++){
-        unz_file_info64 info;
-        if(unzGetCurrentFileInfo64(zip,&info,name,sizeof(name),NULL,0,NULL,0)!=UNZ_OK||info.size_filename>=sizeof(name)||!safe_zip_name(name)||info.uncompressed_size>EXTRACT_LIMIT-total){ok=0;break;}
-        total+=info.uncompressed_size;
-        int n=snprintf(path,sizeof(path),"%s/%s",root,name);
-        if(n<0||(size_t)n>=sizeof(path)){ok=0;break;}
-        size_t name_len=strlen(name);
-        if(name_len&&name[name_len-1]=='/'){
+    int zip=sceIoOpen(vpk,SCE_O_RDONLY,0);if(zip<0)return -1;
+    SceOff end=sceIoLseek(zip,0,SCE_SEEK_END);if(end<22||end>UINT32_MAX){sceIoClose(zip);return -1;}
+    uint32_t file_size=(uint32_t)end,tail_size=file_size<65557u?file_size:65557u,tail_offset=file_size-tail_size;
+    unsigned char*tail=malloc(tail_size);if(!tail||zip_read_at(zip,tail_offset,tail,tail_size)<0){free(tail);sceIoClose(zip);return -1;}
+    int eocd=-1;for(int i=(int)tail_size-22;i>=0;i--)if(zip_u32(tail+i)==0x06054b50u&&(uint32_t)i+22u+(uint32_t)zip_u16(tail+i+20)==tail_size){eocd=i;break;}
+    if(eocd<0){free(tail);sceIoClose(zip);return -1;}
+    uint16_t entries=zip_u16(tail+eocd+10);uint32_t cd_size=zip_u32(tail+eocd+12),cd_offset=zip_u32(tail+eocd+16);
+    free(tail);if(entries>ZIP_ENTRY_LIMIT||cd_offset>file_size||cd_size>file_size-cd_offset||(uint64_t)cd_offset+cd_size>file_size){sceIoClose(zip);return -1;}
+    uint64_t total=0;uint32_t cursor=cd_offset;int ok=1;char name[512],path[1024],parent[1024];unsigned char header[46],local[30];
+    for(uint16_t i=0;i<entries&&ok;i++){
+        if(cursor>file_size-46||zip_read_at(zip,cursor,header,sizeof(header))<0||zip_u32(header)!=0x02014b50u){ok=0;break;}
+        uint16_t flags=zip_u16(header+8),method=zip_u16(header+10),name_len=zip_u16(header+28),extra_len=zip_u16(header+30),comment_len=zip_u16(header+32);
+        uint32_t crc=zip_u32(header+16),compressed=zip_u32(header+20),uncompressed=zip_u32(header+24),local_offset=zip_u32(header+42);
+        uint64_t next=(uint64_t)cursor+46+name_len+extra_len+comment_len;
+        if(!name_len||name_len>=sizeof(name)||next>(uint64_t)cd_offset+cd_size||(flags&1)||compressed==UINT32_MAX||uncompressed==UINT32_MAX||local_offset>=file_size||uncompressed>EXTRACT_LIMIT-total){ok=0;break;}
+        if(zip_read_at(zip,cursor+46,name,name_len)<0){ok=0;break;}name[name_len]=0;
+        if(!safe_zip_name(name)){ok=0;break;}total+=uncompressed;
+        int n=snprintf(path,sizeof(path),"%s/%s",root,name);if(n<0||(size_t)n>=sizeof(path)){ok=0;break;}
+        if(name[name_len-1]=='/'){
             if(mkdirs(path)<0)ok=0;
         }else{
-            char parent[1024];memcpy(parent,path,(size_t)n+1);
-            char *slash=strrchr(parent,'/');if(!slash){ok=0;break;}*slash=0;
-            if(mkdirs(parent)<0||unzOpenCurrentFile(zip)!=UNZ_OK){ok=0;break;}
-            int fd=sceIoOpen(path,SCE_O_WRONLY|SCE_O_CREAT|SCE_O_TRUNC,0666);
-            if(fd<0){unzCloseCurrentFile(zip);ok=0;break;}
-            uint64_t written=0;int read_n;
-            while((read_n=unzReadCurrentFile(zip,buffer,sizeof(buffer)))>0){
-                int at=0;while(at<read_n){int wrote=sceIoWrite(fd,buffer+at,(size_t)(read_n-at));if(wrote<=0){ok=0;break;}at+=wrote;}
-                if(!ok)break;
-                written+=(uint64_t)read_n;
-            }
-            if(read_n<0||written!=info.uncompressed_size||unzCloseCurrentFile(zip)!=UNZ_OK)ok=0;
-            if(sceIoClose(fd)<0)ok=0;
+            if(zip_read_at(zip,local_offset,local,sizeof(local))<0||zip_u32(local)!=0x04034b50u){ok=0;break;}
+            uint64_t data64=(uint64_t)local_offset+30+zip_u16(local+26)+zip_u16(local+28);
+            if(data64>file_size||compressed>file_size-data64){ok=0;break;}
+            memcpy(parent,path,(size_t)n+1);char*slash=strrchr(parent,'/');if(!slash){ok=0;break;}*slash=0;
+            if(mkdirs(parent)<0){ok=0;break;}
+            int out=sceIoOpen(path,SCE_O_WRONLY|SCE_O_CREAT|SCE_O_TRUNC,0666);if(out<0){ok=0;break;}
+            ok=extract_zip_entry(zip,out,(uint32_t)data64,compressed,uncompressed,crc,method)==0;
+            if(sceIoClose(out)<0)ok=0;
         }
-        if(i+1<global.number_entry&&unzGoToNextFile(zip)!=UNZ_OK)ok=0;
+        cursor=(uint32_t)next;
     }
-    if(unzClose(zip)!=UNZ_OK)ok=0;
-    return ok?0:-1;
+    if(cursor!=(uint64_t)cd_offset+cd_size)ok=0;
+    sceIoClose(zip);return ok?0:-1;
 }
 
 static int file_equals(const char *path,const char *expected) {
