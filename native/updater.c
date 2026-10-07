@@ -292,7 +292,11 @@ void dm_updates_check(DmUpdateResult *result) {
     if(dm_system_network_init()<0){result->failed=1;return;}
     static int curl_ready;
     if(!curl_ready){if(curl_global_init(CURL_GLOBAL_DEFAULT)!=CURLE_OK){result->failed=1;return;}curl_ready=1;}
-    MemorySink sink={0};
+    /* The Vita main thread has a small stack. Keeping the 64 KiB manifest
+       buffer here leaves too little room for libcurl/OpenSSL's TLS call stack
+       and can corrupt the return address while checking GitHub at boot. */
+    static MemorySink sink;
+    memset(&sink,0,sizeof(sink));
     if(fetch_manifest(&sink)<0){result->failed=1;return;}
     char schema[8],tag[48];
     if(json_number(sink.data,"schema",schema,sizeof(schema))<0||strcmp(schema,"1")||json_string(sink.data,sink.data+sink.size,"tag",tag,sizeof(tag))<0||!tag[0]){result->failed=1;return;}
