@@ -1,0 +1,43 @@
+#include <jpeglib.h>
+static void file_types_saver_tests(const char*root){
+ char settings[DM_PATH_MAX],pngpath[DM_PATH_MAX],jpgpath[DM_PATH_MAX],badpath[DM_PATH_MAX];
+ assert(!dm_fs_join(settings,sizeof(settings),root,"associations.ini"));dm_associations_test_path(settings);
+ assert(!strcmp(dm_association_app(".TXT"),"notepad"));
+ assert(dm_associate_extension(".DMAPP","notepad")<0);
+ assert(dm_association_choose(".dmapp","notepad")<0);
+ assert(dm_association_choose(".dmsaver","notepad")<0);
+ assert(dm_association_choose(".dmlink","notepad")<0);
+ assert(dm_association_choose(".txt","missing-app")<0);
+ assert(dm_association_choose(".txt/escape","notepad")<0);
+ assert(!dm_association_choose(".TXT","calculator"));
+ assert(!strcmp(dm_association_app(".txt"),"calculator"));
+ assert(!dm_associate_extension(".txt","notepad"));
+ assert(!strcmp(dm_association_app(".txt"),"calculator"));
+ dm_associations_load();assert(!strcmp(dm_association_app(".txt"),"calculator"));
+ char path[DM_PATH_MAX];assert(!dm_fs_join(path,sizeof(path),root,"association-test.txt"));assert(!dm_fs_write(path,"test",4,1));
+ dm_open_file(path);assert(top_window()&&!strcmp(top_window()->app->id,"calculator"));assert(dm_close(top_window()));
+ assert(!dm_association_reset(".txt"));assert(!strcmp(dm_association_app(".txt"),"notepad"));dm_associations_load();assert(!strcmp(dm_association_app(".txt"),"notepad"));
+ assert(!dm_association_choose(".custom","notepad"));assert(!strcmp(dm_association_app(".custom"),"notepad"));dm_associations_load();assert(!strcmp(dm_association_app(".custom"),"notepad"));
+ const DmApp*fixture_app_for_test=NULL;for(int i=0;i<dm_registered_count();i++)if(!strcmp(dm_registered_app(i)->id,"fixture"))fixture_app_for_test=dm_registered_app(i);assert(fixture_app_for_test);assert(!dm_association_choose(".fixture","fixture"));assert(!dm_unregister_app("fixture"));assert(dm_association_app(".fixture")==NULL);assert(!dm_register_app(fixture_app_for_test));assert(!strcmp(dm_association_app(".fixture"),"fixture"));
+ DmWindow*control=dm_launch("control",NULL);assert(control);control->app->click(control,375,296);assert(top_window()&&!strcmp(top_window()->app->id,"filetypes"));
+ DmWindow*types=top_window();int txt_index=0;for(int i=0;i<dm_association_count();i++)if(!strcmp(dm_association_extension(i),".txt"))txt_index=i;types->app->click(types,30,72+txt_index*27+8);types->app->click(types,290,types->h-75);assert(!strcmp(top_window()->app->id,"choosefileapp"));
+ DmWindow*chooser=top_window();DmInstalledApp modules[24];int count=dm_plugin_list(modules,24),calculator_index=-1,visible=0;for(int i=0;i<count;i++)if(modules[i].app){int registered=0;for(int j=0;j<dm_registered_count();j++)if(dm_registered_app(j)==modules[i].app)registered=1;if(registered){if(!strcmp(modules[i].app->id,"calculator"))calculator_index=visible;visible++;}}assert(calculator_index>=0);int rows=(chooser->h-140)/30;for(int page=0;page<calculator_index/rows;page++)chooser->app->click(chooser,160,chooser->h-35);chooser->app->click(chooser,40,75+(calculator_index%rows)*30+10);assert(!chooser->used&&!strcmp(dm_association_app(".txt"),"calculator"));dm_associations_load();assert(!strcmp(dm_association_app(".txt"),"calculator"));assert(!dm_association_reset(".txt"));assert(dm_close(types));assert(dm_close(control));dm_associations_test_path(NULL);
+ dm_preferences.saver_enabled=0;
+ DmWindow*panel=dm_launch("settings",NULL);assert(panel);panel->app->click(panel,520,45);panel->app->click(panel,50,315);assert(dm_saver_active());
+ dm_saver_tick(16,1,0);assert(dm_saver_active());assert(dm_saver_wake());assert(dm_saver_active());dm_saver_tick(16,1,0);assert(dm_saver_active());
+ dm_saver_tick(16,0,0);assert(dm_saver_active());dm_saver_tick(16,0,0);assert(dm_saver_active());
+ dm_saver_tick(16,1,0);assert(!dm_saver_active());assert(dm_close(panel));
+ dm_saver_tick(3600000,0,0);assert(!dm_saver_active());dm_preferences.saver_enabled=1;dm_preferences.saver_seconds=10;
+ dm_saver_tick(10000,0,1);assert(!dm_saver_active());dm_saver_tick(9999,0,0);assert(!dm_saver_active());dm_saver_tick(1,0,0);assert(dm_saver_active());dm_saver_tick(16,1,0);assert(!dm_saver_active());
+ printf("PASS: saved user file associations survive default registration/reload, dispatch/reset/custom types, protected package types, Control Panel chooser; screensaver preview survives activating click/release, wakes on new input, disabled/blocked/automatic timeout\n");
+ assert(!dm_fs_join(pngpath,sizeof(pngpath),root,"thumbnail.png"));assert(!dm_fs_join(jpgpath,sizeof(jpgpath),root,"thumbnail.jpg"));assert(!dm_fs_join(badpath,sizeof(badpath),root,"broken.png"));
+ uint32_t source[128*64],out[64*64];for(int y=0;y<64;y++)for(int x=0;x<128;x++)source[y*128+x]=DM_COLOR(x<64?220:25,50,y<32?30:230,x<64?255:100);
+ assert(!dm_image_save_png(pngpath,128,64,source,1));unsigned w,h;assert(!dm_thumbnail_pixels(pngpath,out,&w,&h)&&w==64&&h==32);assert(out[0]==source[0]&&out[63]==source[126]&&out[31*64]==source[62*128]);
+ assert(!dm_image_save_png(badpath,1,1,source,1));assert(!dm_thumbnail_pixels(badpath,out,&w,&h)&&w==1&&h==1&&out[0]==source[0]);
+ struct jpeg_compress_struct jpeg={0};struct jpeg_error_mgr error;jpeg.err=jpeg_std_error(&error);jpeg_create_compress(&jpeg);unsigned char*encoded=NULL;unsigned long size=0;jpeg_mem_dest(&jpeg,&encoded,&size);jpeg.image_width=128;jpeg.image_height=64;jpeg.input_components=3;jpeg.in_color_space=JCS_RGB;jpeg_set_defaults(&jpeg);jpeg_set_quality(&jpeg,95,TRUE);jpeg_start_compress(&jpeg,TRUE);unsigned char row[128*3];while(jpeg.next_scanline<64){for(int x=0;x<128;x++){row[x*3]=200;row[x*3+1]=60;row[x*3+2]=30;}JSAMPROW rows=row;jpeg_write_scanlines(&jpeg,&rows,1);}jpeg_finish_compress(&jpeg);assert(!dm_fs_write(jpgpath,encoded,size,1));jpeg_destroy_compress(&jpeg);free(encoded);
+ assert(!dm_thumbnail_pixels(jpgpath,out,&w,&h)&&w==64&&h==32);unsigned char*p=(unsigned char*)out;assert(abs(p[0]-200)<5&&abs(p[1]-60)<5&&abs(p[2]-30)<5&&p[3]==255);
+ dm_open_file(pngpath);assert(top_window()&&!strcmp(top_window()->app->id,"images"));assert(dm_close(top_window()));
+ assert(!dm_fs_write(badpath,"bad PNG",7,0));assert(dm_thumbnail_pixels(badpath,out,&w,&h)<0);assert(dm_thumbnail_pixels("ux0:/missing.png",out,&w,&h)<0);
+ assert(dm_file_icon(pngpath,0,0,56));assert(dm_file_icon(jpgpath,60,0,56));assert(dm_file_icon(badpath,120,0,56));assert(dm_file_icon(path,180,0,56));assert(!dm_file_icon("ux0:/unknown.blob",0,0,56));dm_file_icons_clear();
+ printf("PASS: bounded PNG/JPEG thumbnails, aspect ratio, source colors/alpha, 1px image, malformed/missing fallback, image viewer dispatch and document icons\n");
+}

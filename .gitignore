@@ -1,0 +1,7 @@
+/vendor/
+.pocket-build/
+dist/
+node_modules/
+native/build/
+native/desktop/demo/
+app-loader.log

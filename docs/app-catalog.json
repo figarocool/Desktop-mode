@@ -1,0 +1,186 @@
+{
+  "date": "2026-10-02",
+  "method": "Campione mirato; README, manifest e sorgenti selezionati. Nessun benchmark su console. Le stime non sono misure.",
+  "projects": [
+    {
+      "name": "Webamp",
+      "category": "Lettore musicale",
+      "kind": "app",
+      "url": "https://github.com/captbaritone/webamp",
+      "technology": "React DOM, CSS, Web Audio; MilkDrop opzionale WebGL",
+      "portable_effort_estimate": "Alto: vista e backend audio",
+      "notes": "Miglior candidato musicale sul runtime web"
+    },
+    {
+      "name": "JS Paint",
+      "category": "Disegno",
+      "kind": "app",
+      "url": "https://github.com/1j01/jspaint",
+      "technology": "HTML/CSS, DOM, jQuery, Canvas 2D",
+      "portable_effort_estimate": "Alto: DOM e Canvas",
+      "notes": "Buon candidato per riuso nel browser"
+    },
+    {
+      "name": "Quill",
+      "category": "Testo formattato",
+      "kind": "componente",
+      "url": "https://github.com/slab/quill",
+      "technology": "TypeScript, DOM, contenteditable, selezione e layout del browser",
+      "portable_effort_estimate": "Alto: editing e layout",
+      "notes": "Base per un editor semplice; non un Word completo"
+    },
+    {
+      "name": "Slate",
+      "category": "Editor di documenti",
+      "kind": "framework",
+      "url": "https://github.com/ianstormtaylor/slate",
+      "technology": "Core JS/TS; integrazione slate-react basata su React e DOM",
+      "portable_effort_estimate": "Alto per vista; core da valutare",
+      "notes": "Alternativa personalizzabile a Quill"
+    },
+    {
+      "name": "Univer",
+      "category": "Fogli di calcolo e documenti",
+      "kind": "SDK",
+      "url": "https://github.com/dream-num/univer",
+      "technology": "TypeScript, Canvas, UI web, motore formule; API browser/Node",
+      "portable_effort_estimate": "Molto alto per applicazione completa",
+      "notes": "Candidato Office sul runtime web; funzionalità OSS/Pro distinte"
+    },
+    {
+      "name": "Jspreadsheet CE",
+      "category": "Foglio di calcolo",
+      "kind": "componente",
+      "url": "https://github.com/jspreadsheet/ce",
+      "technology": "JavaScript, DOM/CSS, jSuites, modulo formule",
+      "portable_effort_estimate": "Alto: interfaccia a celle",
+      "notes": "Candidato per fogli piccoli; non Excel completo"
+    },
+    {
+      "name": "x-spreadsheet",
+      "category": "Foglio di calcolo",
+      "kind": "componente",
+      "url": "https://github.com/myliang/x-spreadsheet",
+      "technology": "JavaScript, DOM/CSS, rendering Canvas",
+      "portable_effort_estimate": "Alto: rendering e editing",
+      "notes": "Repository segnala migrazione a wolf-table/table"
+    },
+    {
+      "name": "ONLYOFFICE Docs",
+      "category": "Suite Office",
+      "kind": "suite client/server",
+      "url": "https://github.com/ONLYOFFICE/DocumentServer",
+      "technology": "Frontend web e SDK JS; backend e conversione formati",
+      "portable_effort_estimate": "Molto alto; include servizi non JS",
+      "notes": "Valutare separatamente; non modulo offline pronto per PSP"
+    },
+    {
+      "name": "CodeMirror",
+      "category": "Editor testo/codice",
+      "kind": "componente",
+      "url": "https://github.com/codemirror/dev",
+      "technology": "JavaScript/TypeScript, DOM, CSS, editing testo del browser",
+      "portable_effort_estimate": "Alto: layout, input e selezione",
+      "notes": "Base per editor tipo blocco note avanzato"
+    },
+    {
+      "name": "PDF.js",
+      "category": "Lettore PDF",
+      "kind": "libreria + viewer",
+      "url": "https://github.com/mozilla/pdf.js",
+      "technology": "JavaScript, HTML5, Canvas; worker e altri requisiti dipendono dalla build",
+      "portable_effort_estimate": "Alto: renderer e gestione memoria",
+      "notes": "Candidato web, pagine/documenti grandi da misurare"
+    },
+    {
+      "name": "Excalidraw",
+      "category": "Lavagna e diagrammi",
+      "kind": "app + componente",
+      "url": "https://github.com/excalidraw/excalidraw",
+      "technology": "React/TypeScript, DOM e Canvas",
+      "portable_effort_estimate": "Alto",
+      "notes": "Interessante sul runtime web, non priorità PSP"
+    },
+    {
+      "name": "js-solitaire",
+      "category": "Solitario",
+      "kind": "gioco",
+      "url": "https://github.com/rjanjic/js-solitaire",
+      "technology": "JavaScript, DOM, SCSS, sprite, mouse e requestAnimationFrame",
+      "portable_effort_estimate": "Medio: riscrittura rendering/input",
+      "notes": "Ottimo caso di prova; dipendenze di build datate"
+    },
+    {
+      "name": "Minesweeper",
+      "category": "Campo minato",
+      "kind": "gioco",
+      "url": "https://github.com/ziebelje/minesweeper",
+      "technology": "Asset CSS/immagini/JavaScript web nel repository",
+      "portable_effort_estimate": "Basso/medio come stima; audit sorgente da completare",
+      "notes": "Candidato a port dedicato"
+    },
+    {
+      "name": "JavaScript Tetris",
+      "category": "Tetris",
+      "kind": "gioco",
+      "url": "https://github.com/jakesgordon/javascript-tetris",
+      "technology": "JavaScript, Canvas 2D, DOM minimo, tastiera e frame loop",
+      "portable_effort_estimate": "Basso/medio: subset grafico e input",
+      "notes": "Caso di prova per compatibilità Canvas"
+    },
+    {
+      "name": "c4",
+      "category": "Forza quattro",
+      "kind": "gioco",
+      "url": "https://github.com/kenrick95/c4",
+      "technology": "JavaScript/TypeScript e Canvas",
+      "portable_effort_estimate": "Basso/medio come stima",
+      "notes": "Caso di prova con logica e grafica contenute"
+    },
+    {
+      "name": "mcalculator",
+      "category": "Calcolatrice Microsoft sul web",
+      "kind": "app con core WASM",
+      "url": "https://github.com/muzam1l/mcalculator",
+      "technology": "Core C++ portato con WebAssembly, frontend web",
+      "portable_effort_estimate": "Alto senza runtime WASM",
+      "notes": "Non scegliere credendo sia puro JavaScript"
+    },
+    {
+      "name": "mathjs",
+      "category": "Calcoli e formule",
+      "kind": "libreria",
+      "url": "https://github.com/josdejong/mathjs",
+      "technology": "JavaScript, parser e funzioni matematiche",
+      "portable_effort_estimate": "Da verificare su QuickJS; UI da creare",
+      "notes": "Buona candidata per calcolatrice Play OS"
+    },
+    {
+      "name": "chess.js",
+      "category": "Regole degli scacchi",
+      "kind": "libreria",
+      "url": "https://github.com/jhlywa/chess.js",
+      "technology": "TypeScript/JavaScript senza interfaccia grafica",
+      "portable_effort_estimate": "Da verificare su QuickJS; UI da creare",
+      "notes": "Regole riutilizzabili; non include motore avversario"
+    },
+    {
+      "name": "HyperFormula",
+      "category": "Motore formule per fogli",
+      "kind": "libreria",
+      "url": "https://github.com/handsontable/hyperformula",
+      "technology": "TypeScript headless, browser e Node",
+      "portable_effort_estimate": "Da verificare su QuickJS; UI da creare",
+      "notes": "GPLv3 o commerciale; Node compatibile non implica QuickJS compatibile"
+    },
+    {
+      "name": "SheetJS",
+      "category": "Lettura/scrittura fogli",
+      "kind": "libreria",
+      "url": "https://github.com/SheetJS/sheetjs",
+      "technology": "JavaScript, parsing e scrittura formati; non interfaccia Excel",
+      "portable_effort_estimate": "Da verificare su QuickJS e con file limitati",
+      "notes": "Sorgenti trasferiti a git.sheetjs.com"
+    }
+  ]
+}

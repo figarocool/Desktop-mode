@@ -1,0 +1,42 @@
+#include "../wasm_app.h"
+#define DM_WIDGETS_WASM
+#include "../dm_widgets.h"
+#define LOG_LINES 32
+#define LINE_CAP 180
+static char logbuf[LOG_LINES][LINE_CAP],command[512],input[512],cwd[1024],pending[1024];
+static int first,count,scroll,busy,confirming,prompt_mode;static uint32_t cursor;
+static uint32_t slen(const char*s){uint32_t n=0;while(s[n])n++;return n;}
+static void copystr(char*d,uint32_t cap,const char*s){uint32_t i=0;if(cap){while(s[i]&&i+1<cap){d[i]=s[i];i++;}d[i]=0;}}
+static int eq(const char*a,const char*b){uint32_t i=0;while(a[i]&&b[i]&&a[i]==b[i])i++;return a[i]==b[i];}
+static void line(const char*s){int at;if(count==LOG_LINES){at=first;first=(first+1)%LOG_LINES;}else at=(first+count++)%LOG_LINES;copystr(logbuf[at],LINE_CAP,s);scroll=0;}
+static void clearlog(void){first=count=scroll=0;}
+static int path_for(const char*name,char*out){if(!name||!name[0])return -1;char raw[1024],base[1024];copystr(raw,sizeof(raw),name);for(uint32_t i=0;raw[i];i++)if(raw[i]=='\\')raw[i]='/';char*colon=0;for(uint32_t i=0;raw[i];i++)if(raw[i]==':'){colon=raw+i;break;}if(colon){if(colon[1]&&colon[1]!='/')return -1;uint32_t n=(uint32_t)(colon-raw);if(n<2||n>8)return -1;for(uint32_t i=0;i<n;i++)if(!((raw[i]>='a'&&raw[i]<='z')||(raw[i]>='A'&&raw[i]<='Z')||(raw[i]>='0'&&raw[i]<='9')))return -1;for(uint32_t i=0;i<=n;i++)base[i]=raw[i];base[n+1]='/';base[n+2]=0;}
+ else if(raw[0]=='/')copystr(base,sizeof(base),"ux0:/");else copystr(base,sizeof(base),cwd);
+ const char*rest=colon?colon+1:raw;uint32_t i=0;while(rest[i]){while(rest[i]=='/')i++;if(!rest[i])break;char part[256];uint32_t n=0;while(rest[i]&&rest[i]!='/'){if(n+1>=sizeof(part))return -1;part[n++]=rest[i++];}part[n]=0;if(eq(part,"."))continue;if(eq(part,"..")){uint32_t len=slen(base);if(len>5){if(base[len-1]=='/')base[--len]=0;while(len>5&&base[len-1]!='/')len--;if(len>5)base[len]=0;}continue;}uint32_t len=slen(base);if(len&&base[len-1]!='/'){if(len+1>=sizeof(base))return -1;base[len++]='/';base[len]=0;}if(len+n>=sizeof(base))return -1;for(uint32_t j=0;j<n;j++)base[len+j]=part[j];base[len+n]=0;}
+ copystr(out,1024,base);return 0;}
+static int tokens(char*s,char*a[4]){int n=0;char*r=s,*w=s;while(*r){while(*r==' '||*r=='\t')r++;if(!*r)break;if(n==4)return -1;a[n++]=w;char q=0;while(*r){char ch=*r++;if(q){if(ch==q)q=0;else *w++=ch;}else if(ch=='"'||ch=='\'')q=ch;else if(ch==' '||ch=='\t')break;else *w++=ch;}if(q)return -1;*w++=0;}return n;}
+static void list_dir(const char*path){char buf[4096];int offset=0,total=0;for(;;){int n=dm_host_fs_list_text(path,buf,sizeof(buf),offset);if(n<0){line("Cartella non accessibile.");return;}if(!n)break;char*row=buf;for(int i=0;i<n;i++)if(buf[i]=='\n'){buf[i]=0;line(row);row=buf+i+1;offset++;total++;if(total>=128){line("...limite 128 elementi");return;}}if(n<(int)sizeof(buf)-1)break;}char end[64];uint32_t n=0;const char*p="Elementi: ";while(*p)end[n++]=*p++;int v=total;char digits[12];int d=0;do{digits[d++]='0'+v%10;v/=10;}while(v&&d<11);while(d)end[n++]=digits[--d];end[n]=0;line(end);}
+static void execute(void){if(busy)return;char raw[512];copystr(raw,sizeof(raw),command);command[0]=0;cursor=0;if(!raw[0])return;char prompt[1100];uint32_t pos=0;const char*pre=cwd;while(*pre&&pos+1<sizeof(prompt))prompt[pos++]=*pre++;prompt[pos++]='>';prompt[pos++]=' ';for(uint32_t i=0;raw[i]&&pos+1<sizeof(prompt);i++)prompt[pos++]=raw[i];prompt[pos]=0;line(prompt);char*a[4];int n=tokens(raw,a);if(n<0){line("Sintassi non valida.");return;}if(!n)return;for(uint32_t i=0;a[0][i];i++)if(a[0][i]>='A'&&a[0][i]<='Z')a[0][i]+=32;char path[1024],dst[1024];
+ if(eq(a[0],"help")||eq(a[0],"?")){line("dir/ls, cd, pwd, type/cat, copy/cp, ren, mkdir, touch");line("del/rm (Cestino + conferma), open, start, echo, cls, help");line("Percorsi assoluti ux0:/... o relativi; virgolette per spazi.");return;}
+ if(eq(a[0],"cls")||eq(a[0],"clear")){clearlog();return;}if(eq(a[0],"pwd")||eq(a[0],"cwd")){line(cwd);return;}
+ if(eq(a[0],"echo")){if(n>1)line(a[1]);return;}if(eq(a[0],"cd")){if(n==1){line(cwd);return;}if(path_for(a[1],path)||!dm_host_fs_is_directory(path)){line("Cartella non accessibile.");return;}copystr(cwd,sizeof(cwd),path);return;}
+ if(eq(a[0],"dir")||eq(a[0],"ls")){if(path_for(n>1?a[1]:".",path)){line("Percorso non valido.");return;}list_dir(path);return;}
+ if(eq(a[0],"units")||eq(a[0],"drives")){const char*units[]={"ux0:/","uma0:/","imc0:/","ur0:/","ud0:/","vs0:/","os0:/","sa0:/","gro0:/","grw0:/"};for(int i=0;i<10;i++)if(dm_host_fs_is_directory(units[i]))line(units[i]);return;}
+ if(n<2||path_for(a[1],path)){line("Comando o percorso non valido. Usa help.");return;}
+ if(eq(a[0],"type")||eq(a[0],"cat")){int32_t got=dm_host_fs_read(path,input,sizeof(input)-1);if(got<0){line("File non leggibile o troppo grande.");return;}input[got]=0;char*start=input;for(int32_t i=0;i<=got;i++)if(input[i]=='\n'||!input[i]){input[i]=0;line(start);start=input+i+1;}return;}
+ if(eq(a[0],"mkdir")||eq(a[0],"md")){line(dm_host_fs_mkdir(path)<0?"Creazione cartella fallita.":"Cartella creata.");return;}
+ if(eq(a[0],"touch")){line(dm_host_fs_write(path,"",0,1)<0?"File esistente o percorso non scrivibile.":"File creato.");return;}
+ if(eq(a[0],"open")){dm_host_open_file(path);return;}if(eq(a[0],"start")){line(dm_host_launch(a[1],"")<0?"App non disponibile.":"App avviata.");return;}
+ if(eq(a[0],"copy")||eq(a[0],"cp")||eq(a[0],"ren")||eq(a[0],"rename")||eq(a[0],"mv")){if(n!=3||path_for(a[2],dst)){line("Uso: copy/ren sorgente destinazione");return;}if(eq(a[0],"copy")||eq(a[0],"cp")){busy=1;line(dm_host_copy_async(path,dst)<0?(busy=0,"Copia non avviata."):"Copia in corso...");}else line(dm_host_fs_rename(path,dst)<0?"Rinomina fallita.":"Elemento rinominato.");return;}
+ if(eq(a[0],"del")||eq(a[0],"delete")||eq(a[0],"rm")||eq(a[0],"rmdir")){copystr(pending,sizeof(pending),path);confirming=1;busy=1;if(dm_host_confirm("Console - Elimina","Spostare l'elemento nel Cestino?")<0){busy=confirming=0;line("Conferma non disponibile.");}return;}
+ line("Comando sconosciuto. Usa help.");}
+uint32_t dm_app_abi_version(void){return DM_WASM_APP_ABI_VERSION;}
+uint32_t dm_app_text_buffer(void){return(uint32_t)(uintptr_t)input;}
+void dm_app_init(const char*a){(void)a;copystr(cwd,sizeof(cwd),"ux0:/data/desktop-mode/Desktop/");clearlog();line("Desktop Mode Console | comandi Windows/Linux | help");}
+void dm_app_text(uint32_t n){if(n>=sizeof(input))n=sizeof(input)-1;input[n]=0;if(prompt_mode){prompt_mode=0;copystr(command,sizeof(command),input);cursor=slen(command);execute();return;}uint32_t len=slen(command);if(len+n<sizeof(command)){for(uint32_t i=0;i<n;i++)command[len+i]=input[i];command[len+n]=0;cursor=len+n;}}
+void dm_app_event(int32_t type,int32_t result){if(type==DM_WASM_EVENT_CONFIRM){confirming=0;if(result){busy=dm_host_trash_async(pending)>=0;if(!busy)line("Eliminazione non avviata.");}else{busy=0;line("Eliminazione annullata.");}}else if(type==DM_WASM_EVENT_OPERATION){busy=0;line(result==1?"Operazione completata.":result==0?"Operazione annullata.":"Operazione fallita.");}}
+void dm_app_key(int32_t k){if(k==DM_WASM_KEY_ENTER){execute();return;}if(k==DM_WASM_KEY_COPY){dm_host_clipboard_set(command);return;}if(k==DM_WASM_KEY_PASTE){int n=dm_host_clipboard_get(input,sizeof(input));if(n>0){uint32_t len=slen(command);if(len+(uint32_t)n<sizeof(command)){for(int i=0;i<n;i++)command[len+i]=input[i];command[len+n]=0;cursor=len+n;}}return;}if(k==DM_WASM_KEY_BACKSPACE&&cursor){command[--cursor]=0;}if(k==DM_WASM_KEY_SCROLL_UP&&scroll<count)scroll++;if(k==DM_WASM_KEY_SCROLL_DOWN&&scroll)scroll--;}
+void dm_app_menu(int32_t command){if(command==DM_WASM_MENU_CLEAR)clearlog();else if(command==DM_WASM_MENU_COPY)dm_app_key(DM_WASM_KEY_COPY);else if(command==DM_WASM_MENU_PASTE)dm_app_key(DM_WASM_KEY_PASTE);}
+void dm_app_draw(int32_t w,int32_t h){dm_host_rect(5,3,w-10,h-8,0xFF0C1114u);int rows=(h-90)/19;if(rows<1)rows=1;int end=count-scroll;if(end<0)end=0;int firstrow=end-rows;if(firstrow<0)firstrow=0;for(int i=firstrow;i<end;i++){char row[LINE_CAP];copystr(row,sizeof(row),logbuf[(first+i)%LOG_LINES]);dm_host_text(14,22+(i-firstrow)*19,row,0xFFD2E6D2u);}dm_host_rect(12,h-48,w-120,32,0xFF232A30u);dm_host_text(19,h-27,command,0xFFD2E6D2u);dmw_button((DmWidgetRect){w-102,h-48,90,32},busy?"Attendi":"Esegui",busy?DMW_DISABLED:0,0);}
+void dm_app_click(int32_t x,int32_t y,uint32_t buttons){if(buttons&&y>=0&&y<40&&x>220){prompt_mode=1;dm_host_text_prompt("Console - comando",command,input,sizeof(input));}}
+void dm_app_close(void){}

@@ -1,0 +1,54 @@
+name: Vita release
+
+"on":
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build VPK and release archives
+        run: |
+          docker run --rm \
+            -e GITHUB_REF_NAME="$GITHUB_REF_NAME" \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            vitasdk/vitasdk:2026.08 \
+            sh -ec '
+              cmake -S native -B native/build \
+                -DCMAKE_TOOLCHAIN_FILE="$VITASDK/share/vita.toolchain.cmake"
+              cmake --build native/build --target desktop-mode.vpk-vpk --parallel 2
+              cp native/build/desktop-mode.vpk.out native/build/desktop-mode.vpk
+              python3 scripts/package-release.py
+              python3 scripts/create-release-manifest.py "$GITHUB_REF_NAME"
+              cd native/build
+              sha256sum desktop-mode.vpk desktop-mode-apps.zip desktop-mode-sdk.zip desktop-mode-source.zip desktop-pdf-library.zip desktop-mode-update.json notepad.dmapp counter.dmapp browser.dmapp calculator.dmapp taskmanager.dmapp paint.dmapp images.dmapp console.dmapp pdf.dmapp network.dmapp solitaire.dmapp minesweeper.dmapp media.dmapp > SHA256SUMS
+            '
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            native/build/desktop-mode.vpk \
+            native/build/desktop-mode-update.json \
+            native/build/notepad.dmapp native/build/counter.dmapp native/build/browser.dmapp \
+            native/build/calculator.dmapp native/build/taskmanager.dmapp native/build/paint.dmapp \
+            native/build/images.dmapp native/build/console.dmapp native/build/pdf.dmapp \
+            native/build/network.dmapp native/build/solitaire.dmapp native/build/minesweeper.dmapp \
+            native/build/media.dmapp \
+            native/build/desktop-mode-apps.zip \
+            native/build/desktop-mode-sdk.zip \
+            native/build/desktop-mode-source.zip \
+            native/build/desktop-pdf-library.zip \
+            native/build/SHA256SUMS \
+            --title "Desktop Mode $GITHUB_REF_NAME" \
+            --generate-notes
