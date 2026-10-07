@@ -58,7 +58,7 @@ with archive('desktop-pdf-library.zip') as z:
     for platform in ['linux', 'vita']:
         z.write(build / f'pdf-library-{platform}/libdesktop_pdf.a', f'desktop-pdf/lib/{platform}/libdesktop_pdf.a')
 
-shutil.copyfile(build / 'apps/pdf.dmapp', build / 'pdf-linux.dmapp')
+shutil.copyfile(build / 'pdf.dmapp', build / 'pdf-linux.dmapp')
 with zipfile.ZipFile(build / 'desktop-mode.vpk') as z:
     for app in apps:
         assert z.read(f'apps/{app}.dmapp') == (build / f'{app}.dmapp').read_bytes()
