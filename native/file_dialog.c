@@ -31,14 +31,14 @@ static int matches(const char*name) {
     snprintf(filters,sizeof(filters),"%s",dialog.extensions);
     char*save,*part=strtok_r(filters,",",&save);
     while(part) {
-        if(!strcasecmp(ext,part))return 1;
+        if(!dm_ascii_casecmp(ext,part))return 1;
         part=strtok_r(NULL,",",&save);
     }
     return 0;
 }
 static int sort_entries(const void*a,const void*b) {
     const DialogEntry*x=a,*y=b;
-    return x->dir!=y->dir?y->dir-x->dir:strcasecmp(x->name,y->name);
+    return x->dir!=y->dir?y->dir-x->dir:dm_ascii_casecmp(x->name,y->name);
 }
 static void scan(void) {
     dialog.count=dialog.offset=dialog.valid_click=dialog.overwrite=0;

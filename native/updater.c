@@ -190,7 +190,7 @@ static void digest_hex(const unsigned char digest[SHA256_DIGEST_LENGTH],char out
 static int digest_matches(const char *path,const char *expected) {
     unsigned char digest[SHA256_DIGEST_LENGTH];char hex[65];
     if(hash_path(path,digest)<0)return 0;
-    digest_hex(digest,hex);return !strcasecmp(hex,expected);
+    digest_hex(digest,hex);return !dm_ascii_casecmp(hex,expected);
 }
 
 static int download_asset(const char *asset,const char *temporary,uint64_t limit,const char *expected) {
@@ -285,6 +285,11 @@ void dm_updates_check(DmUpdateResult *result) {
 #ifdef DESKTOP_PREVIEW
     return;
 #else
+    /* VitaShell-style one-shot updater bubble is removed after it relaunches us. */
+    dm_core_cleanup_updater();
+    /* The boot updater runs before dm_system_info() and plugin scanning.  Load
+       Vita's socket stack before libcurl creates its first handle. */
+    if(dm_system_network_init()<0){result->failed=1;return;}
     static int curl_ready;
     if(!curl_ready){if(curl_global_init(CURL_GLOBAL_DEFAULT)!=CURLE_OK){result->failed=1;return;}curl_ready=1;}
     MemorySink sink={0};
@@ -320,8 +325,7 @@ void dm_updates_check(DmUpdateResult *result) {
         result->core_ready=1;
         if(core_failure_for_tag(tag,&result->core_install_error))return;
         result->core_install_error=dm_core_install_vpk(final,tag,&result->core_must_exit);
-        if(result->core_install_error==0){result->core_installed=1;sceIoRemove(UPDATE_DIR ".core-install-failed");}
-        else remember_core_failure(tag,result->core_install_error);
+        if(result->core_install_error<0)remember_core_failure(tag,result->core_install_error);
     }
 #endif
 }

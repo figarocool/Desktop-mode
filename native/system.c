@@ -1,6 +1,16 @@
 #include "desktop_ui.h"
 #include <stdio.h>
 #include <string.h>
+int dm_ascii_casecmp(const char*a,const char*b){
+    const unsigned char*x=(const unsigned char*)(a?a:""),*y=(const unsigned char*)(b?b:"");
+    for(;;x++,y++){
+        unsigned char c=*x,d=*y;
+        if(c>='A'&&c<='Z')c=(unsigned char)(c+('a'-'A'));
+        if(d>='A'&&d<='Z')d=(unsigned char)(d+('a'-'A'));
+        if(c!=d)return c<d?-1:1;
+        if(!c)return 0;
+    }
+}
 #ifdef DESKTOP_PREVIEW
 #include <SDL.h>
 uint64_t dm_clock_ms(void) {
@@ -24,6 +34,7 @@ void dm_system_info(DmSystemInfo*i) {
     snprintf(i->firmware,sizeof(i->firmware),"Backend SDL2");
     snprintf(i->ip,sizeof(i->ip),"Non disponibile nell'anteprima");
 }
+int dm_system_network_init(void){return 0;}
 #else
 #include <psp2/power.h>
 #include <psp2/rtc.h>
@@ -35,6 +46,20 @@ void dm_system_info(DmSystemInfo*i) {
 #include <psp2/net/net.h>
 #include <psp2/net/netctl.h>
 #include <stdlib.h>
+static int network_stack_state;
+static void *network_stack_memory;
+int dm_system_network_init(void) {
+    if(network_stack_state>0)return 0;
+    if(network_stack_state<0)return -1;
+    network_stack_memory=malloc(256*1024);
+    if(!network_stack_memory){network_stack_state=-1;return -1;}
+    SceNetInitParam param={network_stack_memory,256*1024,0};
+    int result=sceNetInit(&param);
+    if(result<0){free(network_stack_memory);network_stack_memory=NULL;network_stack_state=-1;return result;}
+    sceNetCtlInit();
+    network_stack_state=1;
+    return 0;
+}
 uint64_t dm_clock_ms(void) {
     return sceKernelGetProcessTimeWide()/1000;
 }
@@ -54,21 +79,8 @@ time_t dm_system_local_epoch(void) {
     return mktime(&t);
 }
 void dm_system_info(DmSystemInfo*i) {
-    static int init;
-    static void*memory;
     memset(i,0,sizeof(*i));
-    if(!init) {
-        init=1;
-        sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
-        memory=malloc(256*1024);
-        if(memory) {
-            SceNetInitParam param= {
-                memory,256*1024,0
-            };
-            sceNetInit(&param);
-            sceNetCtlInit();
-        }
-    }
+    dm_system_network_init();
     i->battery_percent=scePowerGetBatteryLifePercent();
     i->charging=scePowerIsBatteryCharging();
     i->cpu_mhz=scePowerGetArmClockFrequency();

@@ -1,4 +1,5 @@
 #include "media_player.h"
+#include "desktop_api.h"
 #include <string.h>
 #include <strings.h>
 #include <stdio.h>
@@ -70,9 +71,9 @@ static const char *preview_path(const char *path) {
 }
 static int is_pcm_container(const char *path) {
     const char *dot=strrchr(path?path:"",'.');
-    return dot&&(!strcasecmp(dot,".aif")||!strcasecmp(dot,".aiff")||!strcasecmp(dot,".aifc")||!strcasecmp(dot,".au")||!strcasecmp(dot,".snd")||!strcasecmp(dot,".voc"));
+    return dot&&(!dm_ascii_casecmp(dot,".aif")||!dm_ascii_casecmp(dot,".aiff")||!dm_ascii_casecmp(dot,".aifc")||!dm_ascii_casecmp(dot,".au")||!dm_ascii_casecmp(dot,".snd")||!dm_ascii_casecmp(dot,".voc"));
 }
-static int is_rmi(const char *path) { const char *dot=strrchr(path?path:"",'.');return dot&&!strcasecmp(dot,".rmi"); }
+static int is_rmi(const char *path) { const char *dot=strrchr(path?path:"",'.');return dot&&!dm_ascii_casecmp(dot,".rmi"); }
 static int unwrap_rmi(const char *source) {
     unsigned char header[12],chunk[8];FILE *in=fopen(source,"rb");if(!in)return -1;
     if(fread(header,1,sizeof(header),in)!=sizeof(header)||memcmp(header,"RIFF",4)||memcmp(header+8,"RMID",4)){fclose(in);return -1;}
@@ -166,12 +167,12 @@ static SNDFILE *vita_pcm_file;
 static SF_INFO vita_pcm_info;
 static uint64_t vita_pcm_frames;
 static int vita_pcm_eof;
-static int vita_pcm_extension(const char *path){const char*dot=strrchr(path?path:"",'.');return dot&&(!strcasecmp(dot,".aif")||!strcasecmp(dot,".aiff")||!strcasecmp(dot,".aifc")||!strcasecmp(dot,".au")||!strcasecmp(dot,".snd")||!strcasecmp(dot,".voc"));}
+static int vita_pcm_extension(const char *path){const char*dot=strrchr(path?path:"",'.');return dot&&(!dm_ascii_casecmp(dot,".aif")||!dm_ascii_casecmp(dot,".aiff")||!dm_ascii_casecmp(dot,".aifc")||!dm_ascii_casecmp(dot,".au")||!dm_ascii_casecmp(dot,".snd")||!dm_ascii_casecmp(dot,".voc"));}
 #endif
 
 static int supported_path(const char *path) {
     const char *dot=strrchr(path?path:"",'.');
-    return dot&&(!strcasecmp(dot,".wav")||!strcasecmp(dot,".mp3")||!strcasecmp(dot,".m4a")||!strcasecmp(dot,".mp4")||!strcasecmp(dot,".wma")||!strcasecmp(dot,".asf")||!strcasecmp(dot,".avi"));
+    return dot&&(!dm_ascii_casecmp(dot,".wav")||!dm_ascii_casecmp(dot,".mp3")||!dm_ascii_casecmp(dot,".m4a")||!dm_ascii_casecmp(dot,".mp4")||!dm_ascii_casecmp(dot,".wma")||!dm_ascii_casecmp(dot,".asf")||!dm_ascii_casecmp(dot,".avi"));
 }
 int dm_media_player_open(const char *path) {
     dm_media_player_close();

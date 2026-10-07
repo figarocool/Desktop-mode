@@ -2,6 +2,8 @@
 #define DESKTOP_API_H
 #include <stddef.h>
 #include <stdint.h>
+/* Avoid Vita ARM-to-Thumb libc veneers for ASCII identifiers and file names. */
+int dm_ascii_casecmp(const char*a,const char*b);
 #define DM_API_VERSION 3
 #define DM_MAX_WINDOWS 8
 #define DM_APP_LIMIT 48
@@ -85,6 +87,7 @@ int dm_fs_writable(const char*path);
 void dm_fs_parent(char*path);
 typedef struct {int preview,battery_percent,charging,cpu_mhz,gpu_mhz;uint64_t ram_free,storage_total,storage_free;char model[64],firmware[40],ip[40];} DmSystemInfo;
 void dm_system_info(DmSystemInfo*info);
+int dm_system_network_init(void);
 uint64_t dm_clock_ms(void);
 typedef struct { DmWindow *window; char title[96]; int minimized; } DmTaskInfo;
 int dm_tasks(DmTaskInfo*,int capacity);

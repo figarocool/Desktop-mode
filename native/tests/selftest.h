@@ -21,8 +21,18 @@ static void wait_job(void) {
     for(int i=0;i<100000&&dm_job_active();i++)dm_job_tick();
     assert(!dm_job_active());
 }
+static void start_shortcut_tests(void){
+ const DmApp*app=NULL;for(int i=0;i<app_count;i++)if(!strcmp(registry[i]->id,"notepad")){app=registry[i];break;}
+ assert(app);
+ char path[DM_PATH_MAX],contents[128];assert(dm_fs_join(path,sizeof(path),DESK,"Selftest Start Shortcut.dmlink")==0);sceIoRemove(path);
+ snprintf(start_drag_id,sizeof(start_drag_id),"%s",app->id);snprintf(start_drag_title,sizeof(start_drag_title),"Selftest Start Shortcut");start_drag_moved=1;start=1;px=500;py=250;
+ update_start_drag(0);
+ assert(dm_fs_read(path,contents,sizeof(contents))>0&&!strcmp(contents,"app:notepad"));
+ assert(draw_app_shortcut(path,0,0,56));sceIoRemove(path);refresh_desktop();
+ puts("PASS: dragging a Start app creates and renders a valid desktop shortcut");
+}
 static void ui_scale_tests(void){int old=dm_preferences.font_percent;DmWindow test={.x=100,.y=80};DmWindow*prior=dm_current_window;dm_current_window=&test;const int values[]={70,85,110};for(unsigned i=0;i<sizeof(values)/sizeof(values[0]);i++){dm_preferences.font_percent=values[i];int x=210,y=130,w=120,h=40,logical_x=x,logical_y=y;dm_ui_transform_rect(&x,&y,&w,&h);int px=x,py=y;dm_ui_untransform_window_pointer(&test,&px,&py);assert(abs(px-logical_x)<=1&&abs(py-logical_y)<=1);assert(abs(w-(int)(120*dm_ui_scale()+.5f))<=1&&abs(h-(int)(40*dm_ui_scale()+.5f))<=1);}dm_current_window=prior;dm_preferences.font_percent=old;puts("PASS: app font scale keeps drawing geometry and pointer coordinates aligned");}
-static void shell_layout_tests(void){int count=order_count,old_px=px,old_py=py,active=prompt.active,font=dm_preferences.font_percent,size=dm_preferences.icon_size;order_count=1;assert(task_width()==190);order_count=8;assert(task_width()==70);dm_preferences.icon_size=56;dm_preferences.font_percent=85;int normal=icon_item_height(100,"paint-test-2.png");dm_preferences.font_percent=110;int large=icon_item_height(100,"paint-test-2.png");assert(normal>56+39&&large>normal);prompt.active=1;px=500;py=210;prompt_click();assert(prompt.active);px=50;py=300;prompt_click();assert(!prompt.active);order_count=count;px=old_px;py=old_py;prompt.active=active;dm_preferences.font_percent=font;dm_preferences.icon_size=size;puts("PASS: taskbar slots, dynamic icon bounds and outside click closes the complete keyboard prompt");}
+static void shell_layout_tests(void){int count=order_count,old_px=px,old_py=py,active=prompt.active,font=dm_preferences.font_percent,size=dm_preferences.icon_size;order_count=1;assert(task_width()==190);order_count=8;int expected=(680-taskbar_tasks_x())/8;if(expected>190)expected=190;assert(task_width()==expected);dm_preferences.icon_size=56;dm_preferences.font_percent=85;int normal=icon_item_height(100,"paint-test-2.png");dm_preferences.font_percent=110;int large=icon_item_height(100,"paint-test-2.png");assert(normal>56+39&&large>normal);prompt.active=1;px=500;py=210;prompt_click();assert(prompt.active);px=50;py=300;prompt_click();assert(!prompt.active);order_count=count;px=old_px;py=old_py;prompt.active=active;dm_preferences.font_percent=font;dm_preferences.icon_size=size;puts("PASS: taskbar slots, dynamic icon bounds and outside click closes the complete keyboard prompt");}
 #include "dialog_jobs.h"
 #include "selection_apps.h"
 #include "trash_drag.h"
@@ -34,6 +44,7 @@ static void shell_layout_tests(void){int count=order_count,old_px=px,old_py=py,a
 #include "file_types_saver.h"
 #include "network_settings_tests.h"
 static int selftest(void) {
+    start_shortcut_tests();
     ui_scale_tests();
     shell_layout_tests();
     dm_prompt("Testo", "abé", NULL, NULL);

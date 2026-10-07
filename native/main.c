@@ -137,7 +137,9 @@ IconPosition;
 static IconPosition positions[64];
 static int position_count,selected_icon=-1,pending_icon=-1,icon_moved,last_icon=-1,icon_click_valid;
 static int desktop_drop_hover=-1;
-static const DmApp*start_drag_app;
+/* Keep a snapshot while dragging from Start.  App descriptors can belong to
+ * runtime modules, so never retain a descriptor pointer across input frames. */
+static char start_drag_id[64],start_drag_title[128];
 static int start_drag_x,start_drag_y,start_drag_moved;
 static uint64_t icon_click_time;
 static int icon_press_x,icon_press_y,icon_original_x,icon_original_y;
@@ -503,17 +505,25 @@ void dm_prompt(const char*title,const char*initial,DmTextResult cb,void*ctx) {
 }
 #define START_ROWS 8
 static const DmApp*start_app(int index){
- int sorted[DM_APP_LIMIT];for(int i=0;i<app_count;i++){sorted[i]=i;for(int j=i;j>0&&strcasecmp(registry[sorted[j-1]]->title,registry[sorted[j]]->title)>0;j--){int t=sorted[j];sorted[j]=sorted[j-1];sorted[j-1]=t;}}
+ int sorted[DM_APP_LIMIT];for(int i=0;i<app_count;i++){sorted[i]=i;for(int j=i;j>0&&dm_ascii_casecmp(registry[sorted[j-1]]->title,registry[sorted[j]]->title)>0;j--){int t=sorted[j];sorted[j]=sorted[j-1];sorted[j-1]=t;}}
  return index>=0&&index<app_count?registry[sorted[index]]:NULL;
 }
 static void start_page(int direction){
  int last=app_count?(app_count-1)/START_ROWS*START_ROWS:0;
  start_offset+=direction*START_ROWS;if(start_offset<0)start_offset=last;if(start_offset>last)start_offset=0;
 }
-static void create_start_shortcut(const DmApp*app){
- if(!app||!app->id||!app->title)return;
+static int start_app_is_registered(const char*id){
+ if(!id||!id[0])return 0;
+ for(int i=0;i<app_count;i++)if(registry[i]&&registry[i]->id&&!strcmp(registry[i]->id,id))return 1;
+ return 0;
+}
+static void create_start_shortcut(const char*id,const char*title){
+ if(!id||!title||!start_app_is_registered(id)){dm_status("App non piu disponibile: collegamento annullato");return;}
+ size_t id_len=strnlen(id,64);
+ if(!id_len||id_len>=64){dm_status("ID app non valido: collegamento annullato");return;}
+ for(size_t i=0;i<id_len;i++)if(!((id[i]>='a'&&id[i]<='z')||(id[i]>='A'&&id[i]<='Z')||(id[i]>='0'&&id[i]<='9')||id[i]=='_'||id[i]=='-')){dm_status("ID app non valido: collegamento annullato");return;}
  char base[220],name[256],path[DM_PATH_MAX],target[DM_PATH_MAX];size_t n=0;
- for(const unsigned char*p=(const unsigned char*)app->title;*p&&n<sizeof(base)-1;p++)base[n++]=(*p=='/'||*p=='\\'||*p==':'||*p=='\t')?'_':(char)*p;
+ for(const unsigned char*p=(const unsigned char*)title;*p&&n<sizeof(base)-1;p++)base[n++]=(*p=='/'||*p=='\\'||*p==':'||*p=='\t'||*p<32)?'_':(char)*p;
  while(n&&base[n-1]==' ')n--;
  if(!n){memcpy(base,"Applicazione",12);n=12;}
  base[n]=0;
@@ -524,17 +534,19 @@ static void create_start_shortcut(const DmApp*app){
   if(dm_fs_join(path,sizeof(path),DESK,name)<0)break;
   SceIoStat st;if(sceIoGetstat(path,&st)<0){path_ready=1;break;}
  }
- if(!path_ready||snprintf(target,sizeof(target),"app:%s",app->id)>=(int)sizeof(target)||dm_fs_write(path,target,strlen(target),1)<0){dm_status("Impossibile creare il collegamento sul desktop");return;}
+ if(!path_ready||snprintf(target,sizeof(target),"app:%s",id)>=(int)sizeof(target)||dm_fs_write(path,target,strlen(target),1)<0){dm_status("Impossibile creare il collegamento sul desktop");return;}
  refresh_all();dm_status("Collegamento creato sul desktop");
 }
 static void update_start_drag(int held){
- if(!start_drag_app)return;
+ if(!start_drag_id[0])return;
  if(held){if(abs(px-start_drag_x)>5||abs(py-start_drag_y)>5)start_drag_moved=1;return;}
- const DmApp*app=start_drag_app;int moved=start_drag_moved;start_drag_app=NULL;start_drag_moved=0;start=0;
- if(!moved){dm_launch(app->id,NULL);return;}
+ char id[sizeof(start_drag_id)],title[sizeof(start_drag_title)];
+ snprintf(id,sizeof(id),"%s",start_drag_id);snprintf(title,sizeof(title),"%s",start_drag_title);
+ int moved=start_drag_moved;start_drag_id[0]=start_drag_title[0]=0;start_drag_moved=0;start=0;
+ if(!moved){if(start_app_is_registered(id))dm_launch(id,NULL);else dm_status("App non piu disponibile");return;}
  if(py>=504||hit(8,174,310,330))return;
  for(int i=0;i<DM_MAX_WINDOWS;i++){DmWindow*w=&windows[i];if(w->used&&!w->minimized&&px>=w->x&&px<w->x+w->w&&py>=w->y&&py<w->y+w->h)return;}
- create_start_shortcut(app);
+ create_start_shortcut(id,title);
 }
 static DmWindow *top_window(void) {
     for(int i=order_count-1;i>=0;i--)if(windows[order[i]].used&&!windows[order[i]].minimized)return &windows[order[i]];
@@ -563,7 +575,7 @@ int dm_associate_extension(const char*ext,const char*app) {
     int found=0;
     for(int i=0;i<app_count;i++)if(!strcmp(registry[i]->id,app))found=1;
     if(!found)return -1;
-    for(int i=0;i<association_count;i++)if(!strcasecmp(associations[i].extension,ext)) {
+    for(int i=0;i<association_count;i++)if(!dm_ascii_casecmp(associations[i].extension,ext)) {
         snprintf(associations[i].app,64,"%s",app);
         return 0;
     }
@@ -574,7 +586,7 @@ int dm_associate_extension(const char*ext,const char*app) {
 }
 int dm_association_count(void){return association_count;}
 const char*dm_association_extension(int index){return index>=0&&index<association_count?associations[index].extension:NULL;}
-const char*dm_association_default(const char*ext){for(int i=0;i<association_count;i++)if(!strcasecmp(ext,associations[i].extension))return associations[i].app;return NULL;}
+const char*dm_association_default(const char*ext){for(int i=0;i<association_count;i++)if(!dm_ascii_casecmp(ext,associations[i].extension))return associations[i].app;return NULL;}
 int dm_registered_count(void) {
     return app_count;
 }
@@ -695,7 +707,7 @@ int dm_close(DmWindow*w) {
 }
 static int compare(const void*a,const void*b) {
     const Entry*x=a,*y=b;
-    return x->dir!=y->dir?y->dir-x->dir:strcasecmp(x->name,y->name);
+    return x->dir!=y->dir?y->dir-x->dir:dm_ascii_casecmp(x->name,y->name);
 }
 static int read_dir(const char*p,Entry*out,int max) {
     int fd=sceIoDopen(p);
@@ -1067,7 +1079,7 @@ static void open_path(const char*p,int depth) {
         return;
     }
     const char*ext=strrchr(p,'.');
-    if(ext&&!strcasecmp(ext,".dmlink")) {
+    if(ext&&!dm_ascii_casecmp(ext,".dmlink")) {
         char target[DM_PATH_MAX];
         if(dm_fs_read(p,target,sizeof(target))<0) {
             dm_status("Collegamento non valido");
@@ -1081,7 +1093,7 @@ static void open_path(const char*p,int depth) {
         return;
     }
     if(ext) {
-        if(!strcasecmp(ext,".dmapp")) {
+        if(!dm_ascii_casecmp(ext,".dmapp")) {
             dm_load_plugin(p);
             return;
         }
@@ -1106,8 +1118,8 @@ static void run_command(const char*input,void*context) {
     if(n>=2&&target[0]=='"'&&target[n-1]=='"'){memmove(target,target+1,n-2);target[n-2]=0;n-=2;}
     if(!n)return;
     snprintf(run_last,sizeof(run_last),"%s",target);
-    if(!strcasecmp(target,"Computer")){dm_launch("explorer",NULL);return;}
-    for(int i=0;i<app_count;i++)if(!strcmp(target,registry[i]->id)||!strcasecmp(target,registry[i]->title)||(!strncmp(target,"app:",4)&&!strcmp(target+4,registry[i]->id))){dm_launch(registry[i]->id,NULL);return;}
+    if(!dm_ascii_casecmp(target,"Computer")){dm_launch("explorer",NULL);return;}
+    for(int i=0;i<app_count;i++)if(!strcmp(target,registry[i]->id)||!dm_ascii_casecmp(target,registry[i]->title)||(!strncmp(target,"app:",4)&&!strcmp(target+4,registry[i]->id))){dm_launch(registry[i]->id,NULL);return;}
     if(n&&target[n-1]==':'&&n+1<sizeof(target)){target[n++]='/';target[n]=0;}
     if(!strchr(target,':')){
         char relative[DM_PATH_MAX];snprintf(relative,sizeof(relative),"%s",target);
@@ -1123,7 +1135,7 @@ static void run_command(const char*input,void*context) {
     SceIoStat stat;
     if(sceIoGetstat(target,&stat)<0){dm_status("File o cartella non trovato");return;}
     const char*extension=strrchr(target,'.');
-    if(extension&&!strcasecmp(extension,".dmapp")&&!dm_fs_is_directory(target)){
+    if(extension&&!dm_ascii_casecmp(extension,".dmapp")&&!dm_fs_is_directory(target)){
         if(dm_load_plugin(target)<0)return;
         DmInstalledApp installed[DM_APP_LIMIT];int count=dm_plugin_list(installed,DM_APP_LIMIT);
         for(int i=0;i<count;i++)if(installed[i].installed&&!strcmp(installed[i].path,target)){dm_launch(installed[i].app->id,NULL);return;}
@@ -1526,7 +1538,7 @@ static void click(void) {
     }
     if(start) {
         if(hit(8,174,310,START_ROWS*30)) {
-            int idx=start_offset+(py-174)/30;const DmApp*app=start_app(idx);if(app){start_drag_app=app;start_drag_x=px;start_drag_y=py;start_drag_moved=0;}
+            int idx=start_offset+(py-174)/30;const DmApp*app=start_app(idx);if(app&&app->id&&app->title){snprintf(start_drag_id,sizeof(start_drag_id),"%s",app->id);snprintf(start_drag_title,sizeof(start_drag_title),"%s",app->title);start_drag_x=px;start_drag_y=py;start_drag_moved=0;}
         } else if(hit(18,414,288,30))show_run();
         else if(hit(18,452,135,36))start_page(-1);
         else if(hit(171,452,135,36))start_page(1);
@@ -1665,7 +1677,7 @@ static void draw_app_icon(const char*id,int x,int y,int size){
     }
 }
 static int draw_app_shortcut(const char*path,int x,int y,int size){
-    const char*ext=strrchr(path,'.');if(!ext||strcasecmp(ext,".dmlink"))return 0;
+    const char*ext=strrchr(path,'.');if(!ext||dm_ascii_casecmp(ext,".dmlink"))return 0;
     char target[DM_PATH_MAX];if(dm_fs_read(path,target,sizeof(target))<0)return 0;target[strcspn(target,"\r\n")]=0;
     if(strncmp(target,"app:",4))return 0;
     for(int i=0;i<app_count;i++)if(!strcmp(registry[i]->id,target+4)){draw_app_icon(registry[i]->id,x,y,size);return 1;}
@@ -1908,7 +1920,11 @@ int main(void) {
     dm_updates_check(&update_result);
     if(update_result.core_must_exit){
         /* Exit after promotion so the next launch maps the updated executable. */
+#ifndef DESKTOP_PREVIEW
         sceKernelExitProcess(0);
+#else
+        return 0;
+#endif
     }
     dm_scan_plugins();
     if(update_result.apps_updated&&update_result.core_ready){char message[160];snprintf(message,sizeof(message),"%d app aggiornate. Core %s scaricato ma installazione non riuscita (0x%08X).",update_result.apps_updated,update_result.tag,(unsigned)update_result.core_install_error);dm_status(message);}
@@ -1934,7 +1950,7 @@ int main(void) {
         if(line&&line[1]) {
             snprintf(custom_path,sizeof(custom_path),"%s",line+1);
             const char*ext=strrchr(custom_path,'.');
-            if(ext)custom=!strcasecmp(ext,".png")?vita2d_load_PNG_file(custom_path):vita2d_load_JPEG_file(custom_path);
+            if(ext)custom=!dm_ascii_casecmp(ext,".png")?vita2d_load_PNG_file(custom_path):vita2d_load_JPEG_file(custom_path);
         }
     }
 #ifdef DESKTOP_PREVIEW

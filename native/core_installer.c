@@ -1,4 +1,5 @@
 #include "core_installer.h"
+#include "fpkg_head.h"
 
 #ifndef DESKTOP_PREVIEW
 #include <minizip/unzip.h>
@@ -7,11 +8,16 @@
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <psp2/promoterutil.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/sysmodule.h>
 #include <stdio.h>
 #include <string.h>
 
 #define INSTALL_ROOT "ux0:/data/desktop-mode/updates/core-install"
+#define HELPER_ROOT "ux0:/data/desktop-mode/updates/helper-install"
+#define HELPER_VPK "app0:/assets/dm-updater.vpk"
+#define HELPER_TITLE "DMUPD0001"
+#define HELPER_MARKER "ux0:/data/desktop-mode/updates/.updater-installed"
 #define INSTALLED_ROOT "ux0:/app/DSKMODE01"
 #define EXTRACT_LIMIT (48u * 1024u * 1024u)
 #define ZIP_ENTRY_LIMIT 4096u
@@ -61,7 +67,7 @@ static int safe_zip_name(const char *name) {
     return 1;
 }
 
-static int extract_vpk(const char *vpk) {
+static int extract_vpk(const char *vpk,const char *root) {
     unzFile zip=unzOpen64(vpk);
     if(!zip)return -1;
     unz_global_info64 global;
@@ -73,7 +79,7 @@ static int extract_vpk(const char *vpk) {
         unz_file_info64 info;
         if(unzGetCurrentFileInfo64(zip,&info,name,sizeof(name),NULL,0,NULL,0)!=UNZ_OK||info.size_filename>=sizeof(name)||!safe_zip_name(name)||info.uncompressed_size>EXTRACT_LIMIT-total){ok=0;break;}
         total+=info.uncompressed_size;
-        int n=snprintf(path,sizeof(path),"%s/%s",INSTALL_ROOT,name);
+        int n=snprintf(path,sizeof(path),"%s/%s",root,name);
         if(n<0||(size_t)n>=sizeof(path)){ok=0;break;}
         size_t name_len=strlen(name);
         if(name_len&&name[name_len-1]=='/'){
@@ -109,14 +115,14 @@ static int file_equals(const char *path,const char *expected) {
     return !strcmp(data,expected);
 }
 
-static int has_title_id(const char *path) {
+static int has_title_id(const char *path,const char *expected) {
     unsigned char data[8192];
     int fd=sceIoOpen(path,SCE_O_RDONLY,0);
     if(fd<0)return 0;
     int n=sceIoRead(fd,data,sizeof(data));sceIoClose(fd);
-    static const char id[]="DSKMODE01";
-    if(n<(int)sizeof(id)-1)return 0;
-    for(int i=0;i<=n-(int)sizeof(id)+1;i++)if(!memcmp(data+i,id,sizeof(id)-1))return 1;
+    size_t id_len=strlen(expected);
+    if(n<(int)id_len)return 0;
+    for(int i=0;i<=n-(int)id_len;i++)if(!memcmp(data+i,expected,id_len))return 1;
     return 0;
 }
 
@@ -134,7 +140,7 @@ static int promote_directory(const char *path) {
     res=sceSysmoduleLoadModuleInternal(SCE_SYSMODULE_INTERNAL_PROMOTER_UTIL);
     if(res<0){sceSysmoduleUnloadModuleInternalWithArg(SCE_SYSMODULE_INTERNAL_PAF,0,NULL,NULL);return res;}
     res=scePromoterUtilityInit();
-    if(res>=0){res=scePromoterUtilityPromotePkg(path,1);scePromoterUtilityExit();}
+    if(res>=0){res=scePromoterUtilityPromotePkgWithRif(path,1);scePromoterUtilityExit();}
     sceSysmoduleUnloadModuleInternal(SCE_SYSMODULE_INTERNAL_PROMOTER_UTIL);
     sceSysmoduleUnloadModuleInternalWithArg(SCE_SYSMODULE_INTERNAL_PAF,0,NULL,NULL);
     return res;
@@ -145,23 +151,60 @@ int dm_core_install_vpk(const char *vpk_path,const char *expected_version,int *m
     if(!vpk_path||!expected_version||!expected_version[0])return -1;
     remove_tree(INSTALL_ROOT);
     if(mkdirs(INSTALL_ROOT)<0)return -2;
-    if(extract_vpk(vpk_path)<0){remove_tree(INSTALL_ROOT);return -3;}
+    if(extract_vpk(vpk_path,INSTALL_ROOT)<0){remove_tree(INSTALL_ROOT);return -3;}
     char version[512],param[512],eboot[512];
     snprintf(version,sizeof(version),"%s/assets/version.txt",INSTALL_ROOT);
     snprintf(param,sizeof(param),"%s/sce_sys/param.sfo",INSTALL_ROOT);
     snprintf(eboot,sizeof(eboot),"%s/eboot.bin",INSTALL_ROOT);
-    if(!file_equals(version,expected_version)||!has_title_id(param)){remove_tree(INSTALL_ROOT);return -4;}
+    if(!file_equals(version,expected_version)||!has_title_id(param,"DSKMODE01")){remove_tree(INSTALL_ROOT);return -4;}
     SceIoStat st;
     if(sceIoGetstat(eboot,&st)<0||st.st_size<1024||sceIoGetstat(INSTALLED_ROOT,&st)<0){remove_tree(INSTALL_ROOT);return -5;}
-    /* Release app0 before asking the native promoter to replace this title. */
-    if(sceAppMgrUmount("app0:")<0){remove_tree(INSTALL_ROOT);return -6;}
-    if(must_exit)*must_exit=1;
-    int res=promote_directory(INSTALL_ROOT);
+    char marker[512];snprintf(marker,sizeof(marker),"ux0:/data/desktop-mode/updates/core-install.tag");
+    int marker_fd=sceIoOpen(marker,SCE_O_WRONLY|SCE_O_CREAT|SCE_O_TRUNC,0666);
+    if(marker_fd<0){remove_tree(INSTALL_ROOT);return -9;}
+    size_t tag_len=strlen(expected_version);
+    if(sceIoWrite(marker_fd,expected_version,tag_len)!=(int)tag_len||sceIoWrite(marker_fd,"\n",1)!=1){sceIoClose(marker_fd);remove_tree(INSTALL_ROOT);return -9;}
+    sceIoClose(marker_fd);
+    /* Install and launch a different title. That process can safely replace us. */
+    remove_tree(HELPER_ROOT);
+    if(mkdirs(HELPER_ROOT)<0||extract_vpk(HELPER_VPK,HELPER_ROOT)<0){remove_tree(HELPER_ROOT);return -6;}
+    char helper_sfo[512],helper_eboot[512];
+    snprintf(helper_sfo,sizeof(helper_sfo),"%s/sce_sys/param.sfo",HELPER_ROOT);
+    snprintf(helper_eboot,sizeof(helper_eboot),"%s/eboot.bin",HELPER_ROOT);
+    if(!has_title_id(helper_sfo,HELPER_TITLE)){remove_tree(HELPER_ROOT);return -7;}
+    SceIoStat helper_st;
+    if(sceIoGetstat(helper_eboot,&helper_st)<0||helper_st.st_size<1024){remove_tree(HELPER_ROOT);return -8;}
+    if(dm_make_head_bin(HELPER_ROOT,"app0:/assets/vitashell-head.bin",HELPER_TITLE)<0){remove_tree(HELPER_ROOT);return -10;}
+    int res=promote_directory(HELPER_ROOT);
     if(res<0)return res;
+    remove_tree(HELPER_ROOT);
+    int helper_marker_fd=sceIoOpen(HELPER_MARKER,SCE_O_WRONLY|SCE_O_CREAT|SCE_O_TRUNC,0666);
+    if(helper_marker_fd<0)return -11;
+    sceIoWrite(helper_marker_fd,HELPER_TITLE,sizeof(HELPER_TITLE)-1);
+    sceIoClose(helper_marker_fd);
+    char uri[64];
+    snprintf(uri,sizeof(uri),"psgm:play?titleid=%s",HELPER_TITLE);
+    res=sceAppMgrLaunchAppByUri(0xFFFFF,uri);
+    if(res<0)return res;
+    if(must_exit)*must_exit=1;
     return 0;
+}
+void dm_core_cleanup_updater(void) {
+    SceIoStat st;
+    if(sceIoGetstat(HELPER_MARKER,&st)<0)return;
+    int res=load_paf();
+    if(res<0)return;
+    res=sceSysmoduleLoadModuleInternal(SCE_SYSMODULE_INTERNAL_PROMOTER_UTIL);
+    if(res>=0){
+        if(scePromoterUtilityInit()>=0){scePromoterUtilityDeletePkg(HELPER_TITLE);scePromoterUtilityExit();}
+        sceSysmoduleUnloadModuleInternal(SCE_SYSMODULE_INTERNAL_PROMOTER_UTIL);
+    }
+    sceSysmoduleUnloadModuleInternalWithArg(SCE_SYSMODULE_INTERNAL_PAF,0,NULL,NULL);
+    sceIoRemove(HELPER_MARKER);
 }
 #else
 int dm_core_install_vpk(const char *vpk_path,const char *expected_version,int *must_exit) {
     (void)vpk_path;(void)expected_version;if(must_exit)*must_exit=0;return -1;
 }
+void dm_core_cleanup_updater(void) {}
 #endif

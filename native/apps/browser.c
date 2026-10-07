@@ -153,11 +153,11 @@ static void visit(Browser*b,xmlNode*node,int link,int width) {
         }
         if(node->type!=XML_ELEMENT_NODE)continue;
         const char*tag=(const char*)node->name;
-        if(!strcasecmp(tag,"script")||!strcasecmp(tag,"style")||!strcasecmp(tag,"head"))continue;
-        int block=!strcasecmp(tag,"p")||!strcasecmp(tag,"div")||!strcasecmp(tag,"li")||!strcasecmp(tag,"br")||!strcasecmp(tag,"h1")||!strcasecmp(tag,"h2")||!strcasecmp(tag,"tr");
+        if(!dm_ascii_casecmp(tag,"script")||!dm_ascii_casecmp(tag,"style")||!dm_ascii_casecmp(tag,"head"))continue;
+        int block=!dm_ascii_casecmp(tag,"p")||!dm_ascii_casecmp(tag,"div")||!dm_ascii_casecmp(tag,"li")||!dm_ascii_casecmp(tag,"br")||!dm_ascii_casecmp(tag,"h1")||!dm_ascii_casecmp(tag,"h2")||!dm_ascii_casecmp(tag,"tr");
         if(block)newline(b);
         int child_link=link;
-        if(!strcasecmp(tag,"a")) {
+        if(!dm_ascii_casecmp(tag,"a")) {
             xmlChar*href=xmlGetProp(node,(const xmlChar*)"href");
             if(href&&b->link_count<96) {
                 xmlChar*absolute=xmlBuildURI(href,(const xmlChar*)b->url);

@@ -158,7 +158,7 @@ static int extract(const char*path,char*cache) {
 static int app_id_registered(const char*id){for(int i=0;i<dm_registered_count();i++){const DmApp*a=dm_registered_app(i);if(a&&a->id&&!strcmp(a->id,id))return 1;}return 0;}
 int dm_load_plugin(const char*path) {
     const char*extension=strrchr(path,'.');
-    if(!extension||strcasecmp(extension,".dmapp")) {
+    if(!extension||dm_ascii_casecmp(extension,".dmapp")) {
         dm_status("Le app Desktop Mode usano l'estensione .dmapp");
         plugin_log("REJECT",path,"estensione non supportata");
         return -1;
@@ -286,7 +286,7 @@ void dm_scan_plugins(void) {
         memset(&e,0,sizeof(e));
         while(sceIoDread(fd,&e)>0) {
             const char*ext=strrchr(e.d_name,'.');
-            if(ext&&!strcasecmp(ext,".dmapp")) {
+            if(ext&&!dm_ascii_casecmp(ext,".dmapp")) {
                 char full[DM_PATH_MAX];
 #ifdef DESKTOP_PREVIEW
                 const char*directory=i?directories[i]:scan0;
