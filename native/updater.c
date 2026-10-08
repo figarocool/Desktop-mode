@@ -6,6 +6,8 @@
 #include <openssl/sha.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
+#include <psp2/message_dialog.h>
+#include <psp2/kernel/threadmgr.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +30,12 @@ static const Builtin builtins[]={
 };
 static int updater_curl_ready;
 static const char *updater_stage="Avvio controllo aggiornamenti...";
+static SceMsgDialogParam updater_dialog;
+static SceMsgDialogProgressBarParam updater_dialog_bar;
+static int updater_dialog_active;
+static unsigned updater_dialog_ticks;
+static char updater_dialog_description[SCE_MSG_DIALOG_USER_MSG_SIZE];
+static char updater_dialog_bar_text[96];
 
 static void update_trace(const char *stage,int code,long status,uint64_t bytes,int reset) {
     sceIoMkdir("ux0:/data",0777);
@@ -39,6 +47,40 @@ static void update_trace(const char *stage,int code,long status,uint64_t bytes,i
     int n=snprintf(line,sizeof(line),"%s code=%08X http=%ld bytes=%llu\n",stage,(unsigned)code,status,(unsigned long long)bytes);
     if(n>0&&(size_t)n<sizeof(line))sceIoWrite(fd,line,(size_t)n);
     sceIoClose(fd);
+}
+
+static void updater_dialog_close(void) {
+    if(!updater_dialog_active)return;
+    sceMsgDialogAbort();
+    for(unsigned i=0;i<100&&sceMsgDialogGetStatus()==SCE_COMMON_DIALOG_STATUS_RUNNING;i++)sceKernelDelayThread(10000);
+    SceMsgDialogResult result;
+    sceMsgDialogGetResult(&result);
+    sceMsgDialogTerm();
+    updater_dialog_active=0;
+}
+
+static void updater_dialog_start(const char *asset) {
+    updater_dialog_close();
+    const char *destination=!strcmp(asset,"desktop-mode.vpk")?
+        "Dopo il download aggiorna eboot.bin, app integrate e risorse in ux0:/app/DSKMODE01.":
+        "Dopo la verifica, l'app sara salvata in ux0:/data/desktop-mode/apps/.";
+    snprintf(updater_dialog_description,sizeof(updater_dialog_description),
+        "Desktop Mode sta scaricando %s.\n\n%s\nI file personali restano invariati.",asset,destination);
+    memset(&updater_dialog,0,sizeof(updater_dialog));
+    memset(&updater_dialog_bar,0,sizeof(updater_dialog_bar));
+    sceMsgDialogParamInit(&updater_dialog);
+    updater_dialog_bar.barType=SCE_MSG_DIALOG_PROGRESSBAR_TYPE_PERCENTAGE;
+    updater_dialog_bar.sysMsgParam.sysMsgType=SCE_MSG_DIALOG_SYSMSG_TYPE_INVALID;
+    updater_dialog_bar.msg=(const SceChar8 *)updater_dialog_description;
+    updater_dialog.mode=SCE_MSG_DIALOG_MODE_PROGRESS_BAR;
+    updater_dialog.progBarParam=&updater_dialog_bar;
+    int rc=sceMsgDialogInit(&updater_dialog);
+    if(rc<0){update_trace("progress-dialog-init",rc,0,0,0);return;}
+    updater_dialog_active=1;
+    updater_dialog_ticks=0;
+    sceKernelDelayThread(100000);
+    sceMsgDialogProgressBarSetValue(SCE_MSG_DIALOG_PROGRESSBAR_TARGET_BAR_DEFAULT,0);
+    sceMsgDialogProgressBarSetMsg(SCE_MSG_DIALOG_PROGRESSBAR_TARGET_BAR_DEFAULT,(const SceChar8 *)"Avvio download...");
 }
 
 static size_t memory_write(char *data,size_t size,size_t count,void *context) {
@@ -78,8 +120,19 @@ static int updater_http_init(void) {
 }
 
 static int updater_curl_progress(void *unused,curl_off_t download_total,curl_off_t download_now,curl_off_t upload_total,curl_off_t upload_now) {
-    (void)unused;(void)download_total;(void)download_now;
+    (void)unused;
     (void)upload_total;(void)upload_now;
+    if(updater_dialog_active&&((++updater_dialog_ticks&7u)==0u||
+       (download_total>0&&download_now>=download_total))){
+        unsigned percent=download_total>0?(unsigned)((download_now*100)/download_total):0;
+        if(percent>100)percent=100;
+        sceMsgDialogProgressBarSetValue(SCE_MSG_DIALOG_PROGRESSBAR_TARGET_BAR_DEFAULT,percent);
+        unsigned long long now_kib=download_now>0?(unsigned long long)download_now/1024u:0;
+        unsigned long long total_kib=download_total>0?(unsigned long long)download_total/1024u:0;
+        if(total_kib)snprintf(updater_dialog_bar_text,sizeof(updater_dialog_bar_text),"%u%% - %llu / %llu KiB",percent,now_kib,total_kib);
+        else snprintf(updater_dialog_bar_text,sizeof(updater_dialog_bar_text),"%llu KiB scaricati",now_kib);
+        sceMsgDialogProgressBarSetMsg(SCE_MSG_DIALOG_PROGRESSBAR_TARGET_BAR_DEFAULT,(const SceChar8 *)updater_dialog_bar_text);
+    }
     return 0;
 }
 
@@ -257,7 +310,12 @@ static int download_asset(const char *asset,const char *temporary,uint64_t limit
     if(fd<0)return -1;
     FileSink sink={fd,0,0,limit};
     long status=0;
+    updater_dialog_start(asset);
     int code=http_get(url,file_write,&sink,&status);
+    if(updater_dialog_active){
+        if(code==0)sceMsgDialogProgressBarSetValue(SCE_MSG_DIALOG_PROGRESSBAR_TARGET_BAR_DEFAULT,100);
+        updater_dialog_close();
+    }
     if(sceIoClose(fd)<0)sink.failed=1;
     if(code<0||status!=200||sink.failed||!sink.bytes||!digest_matches(temporary,expected)){
         sceIoRemove(temporary);return -1;
