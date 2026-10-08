@@ -2,8 +2,10 @@
 #include "core_installer.h"
 #include "app_manager.h"
 #include "desktop_api.h"
-#include <curl/curl.h>
 #include <openssl/sha.h>
+#include <psp2/net/http.h>
+#include <psp2/libssl.h>
+#include <psp2/sysmodule.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <stdio.h>
@@ -49,42 +51,53 @@ static size_t file_write(char *data,size_t size,size_t count,void *context) {
     return n;
 }
 
-static CURL *new_request(const char *url) {
-    CURL *curl=curl_easy_init();
-    if(!curl)return NULL;
-    curl_easy_setopt(curl,CURLOPT_URL,url);
-    /* Vita can expose stale system proxy settings to libcurl. GitHub is
-       reachable directly on the console; bypass environment proxies and
-       keep the updater on the well-tested HTTP/1.1 path. */
-    curl_easy_setopt(curl,CURLOPT_PROXY,"");
-    curl_easy_setopt(curl,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
-    curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION,1L);
-    curl_easy_setopt(curl,CURLOPT_MAXREDIRS,5L);
-    curl_easy_setopt(curl,CURLOPT_PROTOCOLS_STR,"https");
-    curl_easy_setopt(curl,CURLOPT_REDIR_PROTOCOLS_STR,"https");
-    curl_easy_setopt(curl,CURLOPT_CONNECTTIMEOUT,8L);
-    curl_easy_setopt(curl,CURLOPT_TIMEOUT,90L);
-    curl_easy_setopt(curl,CURLOPT_NOSIGNAL,1L);
-    curl_easy_setopt(curl,CURLOPT_FAILONERROR,1L);
-    curl_easy_setopt(curl,CURLOPT_USERAGENT,"DesktopMode/1 Vita updater");
-#ifdef DESKTOP_PREVIEW
-    curl_easy_setopt(curl,CURLOPT_CAINFO,"native/assets/cacert.pem");
-#else
-    curl_easy_setopt(curl,CURLOPT_CAINFO,"app0:/assets/cacert.pem");
-#endif
-    return curl;
+typedef size_t (*HttpWrite)(char *,size_t,size_t,void *);
+static int vita_http_ready;
+
+/* The updater runs before any windows or plugins are created. Use Sony's
+   HTTPS stack here instead of libcurl/OpenSSL, whose TLS startup was causing
+   a reproducible data abort on real 3.60 hardware. */
+static int vita_http_init(void) {
+    if(vita_http_ready)return 0;
+    if(sceSysmoduleLoadModule(SCE_SYSMODULE_HTTP)<0||sceSysmoduleLoadModule(SCE_SYSMODULE_HTTPS)<0)return -1;
+    int ssl_rc=sceSslInit(300*1024);
+    if(ssl_rc<0&&ssl_rc!=(int)SCE_SSL_ERROR_ALREADY_INITED)return ssl_rc;
+    int http_rc=sceHttpInit(1024*1024);
+    if(http_rc<0&&http_rc!=(int)SCE_HTTP_ERROR_ALREADY_INITED)return http_rc;
+    vita_http_ready=1;
+    return 0;
+}
+
+static int http_get(const char *url,HttpWrite write,void *context,long *status_out) {
+    if(vita_http_init()<0)return -1;
+    int tmpl=sceHttpCreateTemplate("DesktopMode/1 Vita updater",SCE_HTTP_VERSION_1_1,0);
+    if(tmpl<0)return -1;
+    sceHttpSetResolveTimeOut(tmpl,10000000);
+    sceHttpSetConnectTimeOut(tmpl,15000000);
+    sceHttpSetRecvTimeOut(tmpl,90000000);
+    sceHttpSetAutoRedirect(tmpl,SCE_HTTP_ENABLE);
+    int conn=sceHttpCreateConnectionWithURL(tmpl,url,0);
+    if(conn<0){sceHttpDeleteTemplate(tmpl);return -1;}
+    int req=sceHttpCreateRequestWithURL(conn,SCE_HTTP_METHOD_GET,url,0);
+    int result=-1,status=0;
+    if(req>=0&&sceHttpSendRequest(req,NULL,0)>=0&&sceHttpGetStatusCode(req,&status)>=0&&status==200){
+        char buffer[16384];int n;
+        result=0;
+        while((n=sceHttpReadData(req,buffer,sizeof(buffer)))>0){
+            if(write(buffer,1,(size_t)n,context)!=(size_t)n){result=-1;break;}
+        }
+        if(n<0)result=-1;
+    }
+    if(status_out)*status_out=status;
+    if(req>=0)sceHttpDeleteRequest(req);
+    sceHttpDeleteConnection(conn);
+    sceHttpDeleteTemplate(tmpl);
+    return result;
 }
 
 static int fetch_manifest(MemorySink *sink) {
-    CURL *curl=new_request(MANIFEST_URL);
-    if(!curl)return -1;
-    curl_easy_setopt(curl,CURLOPT_TIMEOUT,20L);
-    curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION,memory_write);
-    curl_easy_setopt(curl,CURLOPT_WRITEDATA,sink);
-    CURLcode code=curl_easy_perform(curl);
-    long status=0;curl_easy_getinfo(curl,CURLINFO_RESPONSE_CODE,&status);
-    curl_easy_cleanup(curl);
-    return code==CURLE_OK&&status==200&&sink->size?0:-1;
+    long status=0;
+    return http_get(MANIFEST_URL,memory_write,sink,&status)==0&&status==200&&sink->size?0:-1;
 }
 
 static int json_string(const char *begin,const char *end,const char *key,char *out,size_t cap) {
@@ -206,15 +219,10 @@ static int download_asset(const char *asset,const char *temporary,uint64_t limit
     int fd=sceIoOpen(temporary,SCE_O_WRONLY|SCE_O_CREAT|SCE_O_TRUNC,0666);
     if(fd<0)return -1;
     FileSink sink={fd,0,0,limit};
-    CURL *curl=new_request(url);
-    if(!curl){sceIoClose(fd);sceIoRemove(temporary);return -1;}
-    curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION,file_write);
-    curl_easy_setopt(curl,CURLOPT_WRITEDATA,&sink);
-    CURLcode code=curl_easy_perform(curl);
-    long status=0;curl_easy_getinfo(curl,CURLINFO_RESPONSE_CODE,&status);
-    curl_easy_cleanup(curl);
+    long status=0;
+    int code=http_get(url,file_write,&sink,&status);
     if(sceIoClose(fd)<0)sink.failed=1;
-    if(code!=CURLE_OK||status!=200||sink.failed||!sink.bytes||!digest_matches(temporary,expected)){
+    if(code<0||status!=200||sink.failed||!sink.bytes||!digest_matches(temporary,expected)){
         sceIoRemove(temporary);return -1;
     }
     return 0;
@@ -292,14 +300,10 @@ void dm_updates_check(DmUpdateResult *result) {
 #else
     /* VitaShell-style one-shot updater bubble is removed after it relaunches us. */
     dm_core_cleanup_updater();
-    /* The boot updater runs before dm_system_info() and plugin scanning.  Load
-       Vita's socket stack before libcurl creates its first handle. */
+    /* The boot updater runs before system info and plugin scanning. */
     if(dm_system_network_init()<0){result->failed=1;return;}
-    static int curl_ready;
-    if(!curl_ready){if(curl_global_init(CURL_GLOBAL_DEFAULT)!=CURLE_OK){result->failed=1;return;}curl_ready=1;}
-    /* The Vita main thread has a small stack. Keeping the 64 KiB manifest
-       buffer here leaves too little room for libcurl/OpenSSL's TLS call stack
-       and can corrupt the return address while checking GitHub at boot. */
+    if(vita_http_init()<0){result->failed=1;return;}
+    /* Keep the manifest buffer off the Vita main thread's small stack. */
     static MemorySink sink;
     memset(&sink,0,sizeof(sink));
     if(fetch_manifest(&sink)<0){result->failed=1;return;}
