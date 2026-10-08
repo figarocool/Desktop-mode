@@ -402,6 +402,51 @@ int dm_text_width_raw_scaled(const char*s,int percent) {
 void dm_text_center(int center,int y,const char*t,uint32_t color) {
     dm_text(center-dm_text_width(t)/2,y,t,color);
 }
+void dm_update_screen(const char *message,uint64_t current,uint64_t total) {
+#ifndef DESKTOP_PREVIEW
+    static unsigned marquee_frame;
+    const uint32_t bg=DM_COLOR(15,35,66,255),panel=DM_COLOR(25,51,86,255);
+    vita2d_start_drawing();
+    vita2d_clear_screen();
+    vita2d_draw_rectangle(0,0,960,544,bg);
+    vita2d_draw_rectangle(0,0,960,7,DM_COLOR(68,145,218,255));
+    vita2d_draw_rectangle(158,116,644,312,panel);
+    vita2d_draw_rectangle(158,116,644,2,DM_COLOR(104,166,221,255));
+    vita2d_draw_rectangle(158,116,6,312,DM_COLOR(74,139,201,255));
+    const char *title="Desktop Mode";
+    const char *status=message&&message[0]?message:"Controllo aggiornamenti...";
+    const uint32_t white=DM_COLOR(245,250,255,255),light=DM_COLOR(218,232,248,255),muted=DM_COLOR(170,198,228,255);
+    if(font){
+        vita2d_pgf_draw_text(font,480-vita2d_pgf_text_width(font,0.85f,title)/2,190,white,0.85f,title);
+        vita2d_pgf_draw_text(font,480-vita2d_pgf_text_width(font,0.70f,status)/2,245,light,0.70f,status);
+    }
+    const char *target="Controllo versione e aggiornamenti disponibili";
+    if(message&&strstr(message,"Scaricamento app"))target="Destinazione: ux0:/data/desktop-mode/apps/";
+    else if(message&&strstr(message,"aggiornamento del sistema"))target="Pacchetto completo per Desktop Mode (core e app incluse)";
+    if(font)vita2d_pgf_draw_text(font,480-vita2d_pgf_text_width(font,0.58f,target)/2,275,muted,0.58f,target);
+    vita2d_draw_rectangle(245,307,470,22,DM_COLOR(9,23,43,255));
+    vita2d_draw_rectangle(247,309,466,18,DM_COLOR(41,68,101,255));
+    if(total){
+        uint64_t done=current>total?total:current;
+        int width=(int)(466u*done/total);
+        if(width>0)vita2d_draw_rectangle(247,309,width,18,DM_COLOR(67,159,239,255));
+        char percent[48];snprintf(percent,sizeof(percent),"%u%%",(unsigned)(done*100/total));
+        if(font)vita2d_pgf_draw_text(font,480-vita2d_pgf_text_width(font,0.58f,percent)/2,365,DM_COLOR(220,237,255,255),0.58f,percent);
+    }else{
+        int offset=(int)((marquee_frame++*9u)%560u)-94;
+        if(offset<0)offset=0;
+        if(offset>370)offset=370;
+        vita2d_draw_rectangle(247+offset,309,96,18,DM_COLOR(67,159,239,255));
+        if(font){const char *wait="Attendere...";vita2d_pgf_draw_text(font,480-vita2d_pgf_text_width(font,0.58f,wait)/2,365,DM_COLOR(220,237,255,255),0.58f,wait);}
+    }
+    const char *footer="Verifica sicura e download degli aggiornamenti";
+    if(font)vita2d_pgf_draw_text(font,480-vita2d_pgf_text_width(font,0.52f,footer)/2,401,DM_COLOR(173,196,221,255),0.52f,footer);
+    vita2d_end_drawing();
+    vita2d_swap_buffers();
+#else
+    (void)message;(void)current;(void)total;
+#endif
+}
 static void icon_label(int x,int y,int width,const char*name) {
     char text[256];
     snprintf(text,sizeof(text),"%s",name);
@@ -1927,7 +1972,8 @@ int main(void) {
 #endif
     }
     dm_scan_plugins();
-    if(update_result.apps_updated&&update_result.core_ready){char message[160];snprintf(message,sizeof(message),"%d app aggiornate. Core %s scaricato ma installazione non riuscita (0x%08X).",update_result.apps_updated,update_result.tag,(unsigned)update_result.core_install_error);dm_status(message);}
+    if(update_result.failed&&!update_result.apps_updated&&!update_result.core_ready)dm_status("Controllo aggiornamenti non riuscito. Consulta update.log in ux0:/data/desktop-mode/");
+    else if(update_result.apps_updated&&update_result.core_ready){char message[160];snprintf(message,sizeof(message),"%d app aggiornate. Core %s scaricato ma installazione non riuscita (0x%08X).",update_result.apps_updated,update_result.tag,(unsigned)update_result.core_install_error);dm_status(message);}
     else if(update_result.apps_updated){char message[128];snprintf(message,sizeof(message),"%d app aggiornate da GitHub (%s).",update_result.apps_updated,update_result.tag);dm_status(message);}
     else if(update_result.core_ready){char message[160];snprintf(message,sizeof(message),"Core %s scaricato ma installazione non riuscita (0x%08X); VPK conservata in updates.",update_result.tag,(unsigned)update_result.core_install_error);dm_status(message);}
     dm_associations_load();

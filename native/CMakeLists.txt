@@ -14,7 +14,7 @@ add_executable(desktop_mode main.c filesystem.c plugins.c system.c system_proper
 target_sources(desktop_mode PRIVATE updater.c core_installer.c)
 target_include_directories(desktop_mode PRIVATE vendor/libsmb2/include)
 target_compile_options(desktop_mode PRIVATE -Wall -Wextra -O2 -marm)
-target_link_libraries(desktop_mode smb2 m3 -Wl,--start-group curl ssl crypto lzma ppmd z -Wl,--end-group zstd vita2d png jpeg webp sharpyuv pthread z m SceDisplay_stub SceGxm_stub SceSysmodule_stub SceHttp_stub SceSsl_stub ScePromoterUtil_stub ScePaf_stub SceAvPlayer_stub SceAudio_stub SceCtrl_stub SceTouch_stub ScePgf_stub ScePvf_stub SceCommonDialog_stub SceAppMgr_stub SceLibKernel_stub SceIofilemgr_stub SceSysmem_stub SceProcessmgr_stub SceKernelModulemgr_stub ScePower_stub SceNetCtl_stub SceNet_stub SceRtc_stub SceAVConfig_stub SceHid_stub SceBt_stub SceWlanBt_stub SceKernelThreadMgr_stub SceAppUtil_stub)
+target_link_libraries(desktop_mode smb2 m3 -Wl,--start-group curl mbedtls mbedx509 mbedcrypto ssl crypto lzma ppmd z -Wl,--end-group zstd vita2d png jpeg webp sharpyuv pthread z m SceDisplay_stub SceGxm_stub SceSysmodule_stub SceHttp_stub SceSsl_stub ScePromoterUtil_stub ScePaf_stub SceAvPlayer_stub SceAudio_stub SceCtrl_stub SceTouch_stub ScePgf_stub ScePvf_stub SceCommonDialog_stub SceAppMgr_stub SceLibKernel_stub SceIofilemgr_stub SceSysmem_stub SceProcessmgr_stub SceKernelModulemgr_stub ScePower_stub SceNetCtl_stub SceNet_stub SceRtc_stub SceAVConfig_stub SceHid_stub SceBt_stub SceWlanBt_stub SceKernelThreadMgr_stub SceAppUtil_stub)
 
 # Optional VitaSDK codecs are linked statically into eboot.bin and therefore
 # travel inside the VPK. They are optional so older VitaSDK installations can
@@ -34,7 +34,7 @@ target_compile_definitions(m3 PRIVATE d_m3MaxLinearMemoryPages=1024)
 vita_create_self(eboot.bin desktop_mode UNSAFE)
 add_executable(dm_core_updater core_updater.c)
 target_compile_options(dm_core_updater PRIVATE -Wall -Wextra -O2 -marm)
-target_link_libraries(dm_core_updater crypto SceAppMgr_stub ScePromoterUtil_stub SceSysmodule_stub SceIofilemgr_stub SceLibKernel_stub SceKernelModulemgr_stub)
+target_link_libraries(dm_core_updater vita2d crypto m SceDisplay_stub SceGxm_stub ScePgf_stub ScePvf_stub SceCommonDialog_stub SceAppMgr_stub ScePromoterUtil_stub SceSysmodule_stub SceIofilemgr_stub SceLibKernel_stub SceKernelModulemgr_stub SceKernelThreadMgr_stub)
 vita_create_self(core-updater-eboot.bin dm_core_updater UNSAFE)
 vita_create_vpk(dm-updater.vpk DMUPD0001 core-updater-eboot.bin VERSION "01.00" NAME "Desktop Mode Updater" FILE assets/vitashell-head.bin assets/vitashell-head.bin)
 # vita_create_vpk accumulates -a flags in this variable across invocations.
@@ -112,7 +112,7 @@ foreach(APP ${DM_BUNDLED_APPS})
   target_include_directories(dm_${APP}_module PRIVATE "$ENV{VITASDK}/arm-vita-eabi/include/libxml2")
   target_compile_definitions(dm_${APP}_module PRIVATE DM_PLUGIN_NEWLIB)
   target_link_options(dm_${APP}_module PRIVATE -Wl,--wrap=__getreent)
-  target_link_libraries(dm_${APP}_module -Wl,--start-group curl xml2 ssl crypto z zstd m c gcc SceNet_stub SceNetCtl_stub SceSysmodule_stub SceRtc_stub SceKernelThreadMgr_stub SceSysmem_stub SceLibKernel_stub SceIofilemgr_stub SceProcessmgr_stub SceKernelModulemgr_stub -Wl,--end-group)
+  target_link_libraries(dm_${APP}_module -Wl,--start-group curl mbedtls mbedx509 mbedcrypto xml2 ssl crypto z zstd m c gcc SceNet_stub SceNetCtl_stub SceSysmodule_stub SceRtc_stub SceKernelThreadMgr_stub SceSysmem_stub SceLibKernel_stub SceIofilemgr_stub SceProcessmgr_stub SceKernelModulemgr_stub -Wl,--end-group)
  endif()
  if(NOT APP STREQUAL "browser" AND NOT APP STREQUAL "pdf")
   target_compile_definitions(dm_${APP}_module PRIVATE DM_PLUGIN_NEWLIB)

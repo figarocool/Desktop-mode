@@ -1,10 +1,13 @@
 #include <psp2/appmgr.h>
+#include <psp2/kernel/threadmgr.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <psp2/promoterutil.h>
 #include <psp2/sysmodule.h>
+#include <vita2d.h>
 #include "fpkg_head.h"
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 
 #define TITLE_ID "DMUPD0001"
@@ -12,6 +15,42 @@
 #define VERSION_FILE INSTALL_ROOT "/assets/version.txt"
 #define FAILURE_FILE "ux0:/data/desktop-mode/updates/.core-install-failed"
 #define VERSION_MARKER "ux0:/data/desktop-mode/updates/core-install.tag"
+#define DM_COLOR(r,g,b,a) ((uint32_t)(r)|((uint32_t)(g)<<8)|((uint32_t)(b)<<16)|((uint32_t)(a)<<24))
+
+static vita2d_pgf *font;
+static volatile int install_done;
+static int install_result;
+static int promote_core(void);
+
+static void draw_install_screen(const char *message,uint64_t tick) {
+    vita2d_start_drawing();vita2d_clear_screen();
+    vita2d_draw_rectangle(0,0,960,544,DM_COLOR(15,35,66,255));
+    vita2d_draw_rectangle(0,0,960,7,DM_COLOR(68,145,218,255));
+    vita2d_draw_rectangle(136,72,688,402,DM_COLOR(25,51,86,255));
+    vita2d_draw_rectangle(136,72,688,2,DM_COLOR(104,166,221,255));
+    if(font){
+        vita2d_pgf_draw_text(font,480-vita2d_pgf_text_width(font,0.9f,"Aggiornamento Desktop Mode")/2,132,DM_COLOR(245,250,255,255),0.9f,"Aggiornamento Desktop Mode");
+        vita2d_pgf_draw_text(font,175,178,DM_COLOR(218,232,248,255),0.72f,message?message:"Preparazione installazione...");
+        vita2d_pgf_draw_text(font,175,221,DM_COLOR(255,255,255,255),0.62f,"File sostituiti dal pacchetto:");
+        vita2d_pgf_draw_text(font,195,253,DM_COLOR(211,228,246,255),0.58f,"ux0:/app/DSKMODE01/eboot.bin  -  programma core");
+        vita2d_pgf_draw_text(font,195,280,DM_COLOR(211,228,246,255),0.58f,"ux0:/app/DSKMODE01/apps/*.dmapp  -  app incluse");
+        vita2d_pgf_draw_text(font,195,307,DM_COLOR(211,228,246,255),0.58f,"ux0:/app/DSKMODE01/assets e sce_sys  -  risorse");
+        vita2d_pgf_draw_text(font,175,339,DM_COLOR(157,204,243,255),0.58f,"I dati utente in ux0:/data/desktop-mode/ restano invariati.");
+    }
+    vita2d_draw_rectangle(175,365,610,22,DM_COLOR(9,23,43,255));
+    vita2d_draw_rectangle(177,367,606,18,DM_COLOR(41,68,101,255));
+    int offset=(int)((tick/8u)%700u)-100;if(offset<0)offset=0;if(offset>510)offset=510;
+    vita2d_draw_rectangle(177+offset,367,96,18,DM_COLOR(67,159,239,255));
+    if(font)vita2d_pgf_draw_text(font,480-vita2d_pgf_text_width(font,0.58f,"Attendere, installazione in corso...")/2,419,DM_COLOR(220,237,255,255),0.58f,"Attendere, installazione in corso...");
+    vita2d_end_drawing();vita2d_swap_buffers();
+}
+
+static int install_worker(SceSize args,void *argp) {
+    (void)args;(void)argp;
+    install_result=promote_core();
+    install_done=1;
+    return 0;
+}
 
 static int load_paf(void) {
     uint32_t args[6]={0x180000u,UINT32_MAX,UINT32_MAX,1u,UINT32_MAX,UINT32_MAX};
@@ -67,9 +106,22 @@ static int promote_core(void) {
 
 int main(void) {
     sceAppMgrDestroyOtherApp();
-    int result=promote_core();
+    vita2d_init();font=vita2d_load_default_pgf();
+    draw_install_screen("Verifica pacchetto e versione...",0);
+    SceUID worker=sceKernelCreateThread("dm-core-install",install_worker,0x10000100,64*1024,0,0,NULL);
+    int result;
+    if(worker>=0&&sceKernelStartThread(worker,0,NULL)>=0){
+        uint64_t tick=0;
+        while(!install_done){draw_install_screen("Installazione del pacchetto DSKMODE01...",tick++*16u);sceKernelDelayThread(16000);}
+        sceKernelWaitThreadEnd(worker,NULL,NULL);sceKernelDeleteThread(worker);result=install_result;
+    }else{
+        draw_install_screen("Installazione del pacchetto DSKMODE01...",0);
+        result=promote_core();
+    }
     if(result<0)report_failure(result);
     else sceIoRemove(FAILURE_FILE);
+    draw_install_screen(result<0?"Installazione non riuscita; verra riaperta la versione precedente.":"Installazione completata; riavvio Desktop Mode...",0);
+    sceKernelDelayThread(900000);
     sceAppMgrLaunchAppByUri(0xFFFFF,"psgm:play?titleid=DSKMODE01");
     return 0;
 }

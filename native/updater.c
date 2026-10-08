@@ -2,10 +2,8 @@
 #include "core_installer.h"
 #include "app_manager.h"
 #include "desktop_api.h"
+#include <curl/curl.h>
 #include <openssl/sha.h>
-#include <psp2/net/http.h>
-#include <psp2/libssl.h>
-#include <psp2/sysmodule.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <stdio.h>
@@ -28,6 +26,20 @@ static const Builtin builtins[]={
     {"paint"},{"images"},{"console"},{"pdf"},{"network"},
     {"solitaire"},{"minesweeper"},{"media"}
 };
+static int updater_curl_ready;
+static const char *updater_stage="Avvio controllo aggiornamenti...";
+
+static void update_trace(const char *stage,int code,long status,uint64_t bytes,int reset) {
+    sceIoMkdir("ux0:/data",0777);
+    sceIoMkdir("ux0:/data/desktop-mode",0777);
+    int fd=sceIoOpen("ux0:/data/desktop-mode/update.log",SCE_O_WRONLY|SCE_O_CREAT|(reset?SCE_O_TRUNC:0),0666);
+    if(fd<0)return;
+    if(!reset)sceIoLseek(fd,0,SCE_SEEK_END);
+    char line[160];
+    int n=snprintf(line,sizeof(line),"%s code=%08X http=%ld bytes=%llu\n",stage,(unsigned)code,status,(unsigned long long)bytes);
+    if(n>0&&(size_t)n<sizeof(line))sceIoWrite(fd,line,(size_t)n);
+    sceIoClose(fd);
+}
 
 static size_t memory_write(char *data,size_t size,size_t count,void *context) {
     MemorySink *sink=context;
@@ -52,52 +64,72 @@ static size_t file_write(char *data,size_t size,size_t count,void *context) {
 }
 
 typedef size_t (*HttpWrite)(char *,size_t,size_t,void *);
-static int vita_http_ready;
 
-/* The updater runs before any windows or plugins are created. Use Sony's
-   HTTPS stack here instead of libcurl/OpenSSL, whose TLS startup was causing
-   a reproducible data abort on real 3.60 hardware. */
-static int vita_http_init(void) {
-    if(vita_http_ready)return 0;
-    if(sceSysmoduleLoadModule(SCE_SYSMODULE_HTTP)<0||sceSysmoduleLoadModule(SCE_SYSMODULE_HTTPS)<0)return -1;
-    int ssl_rc=sceSslInit(300*1024);
-    if(ssl_rc<0&&ssl_rc!=(int)SCE_SSL_ERROR_ALREADY_INITED)return ssl_rc;
-    int http_rc=sceHttpInit(1024*1024);
-    if(http_rc<0&&http_rc!=(int)SCE_HTTP_ERROR_ALREADY_INITED)return http_rc;
-    vita_http_ready=1;
+/* Vita firmware 3.60's SceHttps cannot negotiate modern TLS with GitHub.
+   Use VitaSDK's curl-mbedtls build, bundled in the VPK, and validate the
+   complete certificate chain using the app's CA bundle. */
+static int updater_http_init(void) {
+    if(updater_curl_ready)return 0;
+    CURLcode rc=curl_global_init(CURL_GLOBAL_DEFAULT);
+    if(rc!=CURLE_OK){update_trace("curl-global-init",(int)rc,0,0,0);return -1;}
+    updater_curl_ready=1;
+    update_trace("curl-mbedtls-init",0,0,0,0);
+    return 0;
+}
+
+static int updater_curl_progress(void *unused,curl_off_t download_total,curl_off_t download_now,curl_off_t upload_total,curl_off_t upload_now) {
+    (void)unused;(void)download_total;(void)download_now;
+    (void)upload_total;(void)upload_now;
     return 0;
 }
 
 static int http_get(const char *url,HttpWrite write,void *context,long *status_out) {
-    if(vita_http_init()<0)return -1;
-    int tmpl=sceHttpCreateTemplate("DesktopMode/1 Vita updater",SCE_HTTP_VERSION_1_1,0);
-    if(tmpl<0)return -1;
-    sceHttpSetResolveTimeOut(tmpl,10000000);
-    sceHttpSetConnectTimeOut(tmpl,15000000);
-    sceHttpSetRecvTimeOut(tmpl,90000000);
-    sceHttpSetAutoRedirect(tmpl,SCE_HTTP_ENABLE);
-    int conn=sceHttpCreateConnectionWithURL(tmpl,url,0);
-    if(conn<0){sceHttpDeleteTemplate(tmpl);return -1;}
-    int req=sceHttpCreateRequestWithURL(conn,SCE_HTTP_METHOD_GET,url,0);
-    int result=-1,status=0;
-    if(req>=0&&sceHttpSendRequest(req,NULL,0)>=0&&sceHttpGetStatusCode(req,&status)>=0&&status==200){
-        char buffer[16384];int n;
-        result=0;
-        while((n=sceHttpReadData(req,buffer,sizeof(buffer)))>0){
-            if(write(buffer,1,(size_t)n,context)!=(size_t)n){result=-1;break;}
-        }
-        if(n<0)result=-1;
-    }
+    int init_rc=updater_http_init();
+    if(init_rc<0)return init_rc;
+    CURL *curl=curl_easy_init();
+    if(!curl){update_trace("curl-easy-init",-1,0,0,0);return -1;}
+    char error[CURL_ERROR_SIZE]={0};
+    curl_easy_setopt(curl,CURLOPT_ERRORBUFFER,error);
+    curl_easy_setopt(curl,CURLOPT_URL,url);
+    curl_easy_setopt(curl,CURLOPT_HTTPGET,1L);
+    curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION,write);
+    curl_easy_setopt(curl,CURLOPT_WRITEDATA,context);
+    curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION,1L);
+    curl_easy_setopt(curl,CURLOPT_MAXREDIRS,8L);
+    curl_easy_setopt(curl,CURLOPT_CONNECTTIMEOUT,20L);
+    curl_easy_setopt(curl,CURLOPT_TIMEOUT,180L);
+    curl_easy_setopt(curl,CURLOPT_NOSIGNAL,1L);
+    curl_easy_setopt(curl,CURLOPT_USERAGENT,"DesktopMode/1 (PS Vita updater)");
+    curl_easy_setopt(curl,CURLOPT_PROTOCOLS_STR,"https");
+    curl_easy_setopt(curl,CURLOPT_REDIR_PROTOCOLS_STR,"https");
+    curl_easy_setopt(curl,CURLOPT_SSLVERSION,(long)CURL_SSLVERSION_TLSv1_2);
+    curl_easy_setopt(curl,CURLOPT_NOPROGRESS,0L);
+    curl_easy_setopt(curl,CURLOPT_XFERINFOFUNCTION,updater_curl_progress);
+    curl_easy_setopt(curl,CURLOPT_XFERINFODATA,NULL);
+    curl_easy_setopt(curl,CURLOPT_CAINFO,"app0:/assets/cacert.pem");
+    curl_easy_setopt(curl,CURLOPT_SSL_VERIFYPEER,1L);
+    curl_easy_setopt(curl,CURLOPT_SSL_VERIFYHOST,2L);
+    CURLcode rc=curl_easy_perform(curl);
+    long status=0;
+    curl_easy_getinfo(curl,CURLINFO_RESPONSE_CODE,&status);
     if(status_out)*status_out=status;
-    if(req>=0)sceHttpDeleteRequest(req);
-    sceHttpDeleteConnection(conn);
-    sceHttpDeleteTemplate(tmpl);
-    return result;
+    if(rc!=CURLE_OK){
+        update_trace("curl-request",(int)rc,status,(uint64_t)strlen(error),0);
+        if(error[0])update_trace(error,0,status,0,0);
+    }else if(status!=200)update_trace("http-status",0,status,0,0);
+    else update_trace("http-complete",0,status,0,0);
+    curl_easy_cleanup(curl);
+    return rc==CURLE_OK&&status==200?0:-1;
 }
 
 static int fetch_manifest(MemorySink *sink) {
+    updater_stage="Controllo aggiornamenti su GitHub...";
+    update_trace(updater_stage,0,0,0,0);
     long status=0;
-    return http_get(MANIFEST_URL,memory_write,sink,&status)==0&&status==200&&sink->size?0:-1;
+    int rc=http_get(MANIFEST_URL,memory_write,sink,&status);
+    if(rc<0||status!=200||!sink->size){update_trace("manifest-failed",rc,status,sink->size,0);return -1;}
+    update_trace("manifest-ok",0,status,sink->size,0);
+    return 0;
 }
 
 static int json_string(const char *begin,const char *end,const char *key,char *out,size_t cap) {
@@ -215,6 +247,11 @@ static int download_asset(const char *asset,const char *temporary,uint64_t limit
     char url[256];
     int n=snprintf(url,sizeof(url),"https://github.com/figarocool/Desktop-mode/releases/latest/download/%s",asset);
     if(n<0||(size_t)n>=sizeof(url))return -1;
+    char label[128];
+    if(!strcmp(asset,"desktop-mode.vpk"))snprintf(label,sizeof(label),"Scaricamento aggiornamento del sistema...");
+    else snprintf(label,sizeof(label),"Scaricamento app %s...",asset);
+    updater_stage=label;
+    update_trace(updater_stage,0,0,0,0);
     sceIoRemove(temporary);
     int fd=sceIoOpen(temporary,SCE_O_WRONLY|SCE_O_CREAT|SCE_O_TRUNC,0666);
     if(fd<0)return -1;
@@ -298,11 +335,19 @@ void dm_updates_check(DmUpdateResult *result) {
 #ifdef DESKTOP_PREVIEW
     return;
 #else
+    update_trace("startup",0,0,0,1);
+    updater_stage="Avvio controllo aggiornamenti...";
+    /* Do not enter vita2d drawing while boot-time update/network code runs.
+       The prior splash rendered from this path caused a data abort on 3.60. */
+    ensure_directories();
     /* VitaShell-style one-shot updater bubble is removed after it relaunches us. */
     dm_core_cleanup_updater();
     /* The boot updater runs before system info and plugin scanning. */
-    if(dm_system_network_init()<0){result->failed=1;return;}
-    if(vita_http_init()<0){result->failed=1;return;}
+    updater_stage="Connessione alla rete...";
+    update_trace(updater_stage,0,0,0,0);
+    int network_rc=dm_system_network_init();
+    if(network_rc<0){result->failed=1;update_trace("network-init",network_rc,0,0,0);return;}
+    if(updater_http_init()<0){result->failed=1;return;}
     /* Keep the manifest buffer off the Vita main thread's small stack. */
     static MemorySink sink;
     memset(&sink,0,sizeof(sink));
@@ -310,9 +355,9 @@ void dm_updates_check(DmUpdateResult *result) {
     char schema[8],tag[48];
     if(json_number(sink.data,"schema",schema,sizeof(schema))<0||strcmp(schema,"1")||json_string(sink.data,sink.data+sink.size,"tag",tag,sizeof(tag))<0||!tag[0]){result->failed=1;return;}
     snprintf(result->tag,sizeof(result->tag),"%s",tag);
-    ensure_directories();
+    update_trace("release-manifest",0,200,sink.size,0);
     const char *apps_object=object_for(sink.data,"apps");
-    if(!apps_object){result->failed=1;return;}
+    if(!apps_object){result->failed=1;update_trace("manifest-apps-missing",-1,200,sink.size,0);return;}
     for(unsigned i=0;i<sizeof(builtins)/sizeof(builtins[0]);i++){
         const char *object=object_for(apps_object,builtins[i].id);
         char asset[96],digest[72],expected[96];
@@ -320,11 +365,11 @@ void dm_updates_check(DmUpdateResult *result) {
         if(field_from_object(object,"asset",asset,sizeof(asset))<0||strcmp(asset,expected)||field_from_object(object,"sha256",digest,sizeof(digest))<0||!valid_digest(digest)){result->failed=1;continue;}
         int changed=update_app(builtins[i].id,digest);
         if(changed>0)result->apps_updated++;
-        else if(changed<0)result->failed++;
+        else if(changed<0){result->failed++;update_trace("app-download-failed",-1,0,0,0);}
     }
     char core_digest[72],core_asset[96],current_version[64]={0};
     const char *core=object_for(sink.data,"core");
-    if(field_from_object(core,"asset",core_asset,sizeof(core_asset))<0||strcmp(core_asset,"desktop-mode.vpk")||field_from_object(core,"sha256",core_digest,sizeof(core_digest))<0||!valid_digest(core_digest)){result->failed++;return;}
+    if(field_from_object(core,"asset",core_asset,sizeof(core_asset))<0||strcmp(core_asset,"desktop-mode.vpk")||field_from_object(core,"sha256",core_digest,sizeof(core_digest))<0||!valid_digest(core_digest)){result->failed++;update_trace("manifest-core-invalid",-1,200,sink.size,0);return;}
     dm_fs_read("app0:/assets/version.txt",current_version,sizeof(current_version));
     current_version[strcspn(current_version,"\r\n")]=0;
     if(release_is_newer(tag,current_version)){
@@ -332,12 +377,13 @@ void dm_updates_check(DmUpdateResult *result) {
         snprintf(temp,sizeof(temp),UPDATE_DIR ".desktop-mode.vpk.part");
         snprintf(final,sizeof(final),UPDATE_DIR "desktop-mode.vpk");
         if(!digest_matches(final,core_digest)){
-            if(download_asset(core_asset,temp,CORE_LIMIT,core_digest)<0){result->failed++;return;}
-            if(replace_file(temp,final,UPDATE_DIR ".desktop-mode.vpk.old")<0){sceIoRemove(temp);result->failed++;return;}
+            if(download_asset(core_asset,temp,CORE_LIMIT,core_digest)<0){result->failed++;update_trace("core-download-failed",-1,0,0,0);return;}
+            if(replace_file(temp,final,UPDATE_DIR ".desktop-mode.vpk.old")<0){sceIoRemove(temp);result->failed++;update_trace("core-store-failed",-1,0,0,0);return;}
         }
         result->core_ready=1;
-        if(core_failure_for_tag(tag,&result->core_install_error))return;
+        if(core_failure_for_tag(tag,&result->core_install_error)){update_trace("core-previous-install-failure",result->core_install_error,0,0,0);return;}
         result->core_install_error=dm_core_install_vpk(final,tag,&result->core_must_exit);
+        update_trace("core-install",result->core_install_error,0,0,0);
         if(result->core_install_error<0)remember_core_failure(tag,result->core_install_error);
     }
 #endif
